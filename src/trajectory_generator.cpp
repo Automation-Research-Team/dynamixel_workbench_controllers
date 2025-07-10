@@ -16,7 +16,7 @@
 
 /* Authors: Darby Lim, Hye-Jong KIM, Ryan Shim, Yong-Ho Na */
 
-#include "dynamixel_workbench_controllers/trajectory_generator.h"
+#include <dynamixel_workbench_controllers/trajectory_generator.hpp>
 
 MinimumJerk::MinimumJerk()
 {
