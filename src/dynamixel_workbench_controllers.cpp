@@ -99,8 +99,7 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
     }
     catch (const std::exception& err)
     {
-	RCLCPP_ERROR_STREAM(get_logger(),
-			    "Failed initialization: " << err.what());
+	RCLCPP_ERROR_STREAM(get_logger(), err.what());
 	return;
     }
 
@@ -122,8 +121,8 @@ DynamixelController::initDynamixels(const std::string& yaml_file)
     std::vector<ItemValue>	item_values;
     YAML::Node			dynamixel = YAML::LoadFile(yaml_file);
 
-    for (YAML::const_iterator it_file = dynamixel.begin();
-	 it_file != dynamixel.end(); ++it_file)
+    for (auto it_file = dynamixel.begin(); it_file != dynamixel.end();
+	 ++it_file)
     {
 	if (const auto name = it_file->first.as<std::string>(); name.size())
 	{
