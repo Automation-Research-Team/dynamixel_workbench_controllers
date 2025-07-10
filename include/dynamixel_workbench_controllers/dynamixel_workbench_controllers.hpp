@@ -31,7 +31,7 @@
 #include <dynamixel_workbench_msgs/msg/dynamixel_state_list.hpp>
 #include <dynamixel_workbench_msgs/srv/dynamixel_command.hpp>
 
-#include <dynamixel_workbench_controllers/trajectory_generator.h>
+#include <dynamixel_workbench_controllers/trajectory_generator.hpp>
 
 // SYNC_WRITE_HANDLER
 #define SYNC_WRITE_HANDLER_FOR_GOAL_POSITION 0
@@ -42,7 +42,7 @@
 
 // #define DEBUG
 
-namespace dynamixel_workbench_controller
+namespace dynamixel_workbench_controllers
 {
 /************************************************************************
 *  class DynamixelController						*
@@ -54,7 +54,8 @@ class DynamixelController : public rclcpp::Node
     using twist_cp		= twist_t::UniquePtr;
     using trajectory_t		= trajectory_msgs::msg::JointTrajectory;
     using trajectory_cp		= trajectory_t::UniquePtr;
-    using joint_state_t		= sensor_msgs::JointState;
+    using trajectory_point_t	= trajectory_msgs::msg::JointTrajectoryPoint;
+    using joint_state_t		= sensor_msgs::msg::JointState;
 
     using dynamixel_state_t	= dynamixel_workbench_msgs::msg::
 					DynamixelState;
@@ -63,17 +64,20 @@ class DynamixelController : public rclcpp::Node
     using dynamixel_states_cp	= dynamixel_states_t::UniquePtr;
     using dynamixel_command_t	= dynamixel_workbench_msgs::srv::
 					DynamixelCommand;
+    using dynamixel_command_req	= dynamixel_command_t::Request::SharedPtr;
+    using dynamixel_command_res	= dynamixel_command_t::Response::SharedPtr;
 
     template <class MSG>
     using publisher_p		= typename rclcpp::Publisher<MSG>::SharedPtr;
     template <class MSG>
     using subscription_p	= typename rclcpp::Subscription<MSG>::SharedPtr;
     template <class SRV>
-    using server_p		= typename rclcpp::Server<SRV>::SharedPtr;
-
+    using service_p		= typename rclcpp::Service<SRV>::SharedPtr;
+    using timer_p		= rclcpp::TimerBase::SharedPtr;
 
     struct ItemValue
     {
+	std::string	dxl_name;
 	std::string	item_name;
 	int32_t		value;
     };
@@ -82,62 +86,50 @@ class DynamixelController : public rclcpp::Node
     DynamixelController(const rclcpp::NodeOptions& options);
 
   private:
-    bool	initWorkbench(const std::string& port_name,
+    void	initWorkbench(const std::string& port_name,
 			      const uint32_t baud_rate)			;
-    bool	getDynamixelsInfo(const std::string& yaml_file)		;
-    bool	loadDynamixels()					;
-    bool	initDynamixels()					;
-    bool	initControlItems()					;
-    bool	initSDKHandlers()					;
-    bool	getPresentPosition(std::vector<std::string> dxl_name)	;
+    void	initDynamixels(const std::string& yaml_file)		;
+    void	initControlItems()					;
+    void	initSDKHandlers()					;
 
-    double	getReadPeriod()		const	{ return read_period_; }
-    double	getWritePeriod()	const	{ return write_period_;}
-    double	getPublishPeriod()	const	{ return pub_period_; }
+    void	dynamixelCommandCallback(const dynamixel_command_req req,
+					 dynamixel_command_res res)	;
+    void	twistCallback(const twist_cp& twist)			;
+    void	trajectoryCallback(const trajectory_cp& trajectory)	;
 
     void	readCallback()						;
     void	writeCallback()						;
     void	publishCallback()					;
 
-    void	commandVelocityCallback(const twist_cp& twist)		;
-    void	trajectoryMsgCallback(const trajectory_cp& trajectory)	;
-    bool	dynamixelCommandMsgCallback(
-		    const dynamixel_command_t::Request::SharedPtr& req,
-		    dynamixel_command_t::Response::SharedPtr& res)	;
+    std::vector<WayPoint>
+		getWayPoints(const std::vector<std::string>& joint_names);
 
   private:
-    const bool					is_joint_state_topic_;
-    const bool					is_cmd_vel_topic_;
+  // ROS publisher/subscriber/service
+    const publisher_p<dynamixel_states_t>	dxl_states_pub_;
+    const publisher_p<joint_state_t>		joint_state_pub_;
+    const subscription_p<twist_t>		twist_sub_;
+    const subscription_p<trajectory_t>		trajectory_sub_;
+    const service_p<dynamixel_command_t>	dxl_command_srv_;
+
+  // Dynamixel Workbench
+    DynamixelWorkbench				dxl_wb_;
+    std::map<std::string, uint8_t>		dxl_ids_;
+    std::map<std::string, const ControlItem*>	control_items_;
+    dynamixel_states_t				dxl_states_;
+
+    double					wheel_separation_;
+    double					wheel_radius_;
     const bool					use_moveit_;
 
-  // ROS Topic Publisher
-    const publisher_p<dynamixel_states_t>	dynamixel_state_list_pub_;
-    const publisher_p<joint_state_t>		joint_states_pub_;
-    const subscription_p<twist_t>		cmd_vel_sub_;
-    const server_p<dynamixel_command_t>		trajectory_sub_;
+    trajectory_t				trajectory_;
+    size_t					point_cnt_;
+    size_t					position_cnt_;
+    bool					is_moving_;
 
-
-  // Dynamixel Workbench Parameters
-    std::unique_ptr<DynamixelWorkbench>			dxl_wb_;
-
-    std::map<std::string, uint8_t>			dynamixel_;
-    std::map<std::string, const ControlItem*>		control_items_;
-    std::vector<std::pair<std::string, ItemValue>>	dynamixel_info_;
-    dynamixel_workbench_msgs::DynamixelStateList	dynamixel_state_list_;
-    sensor_msgs::JointState				joint_state_msg_;
-    std::vector<WayPoint>				pre_goal_;
-
-
-    double						wheel_separation_;
-    double						wheel_radius_;
-
-    std::shared_ptr<JointTrajectory>			jnt_tra_;
-    std::shared_ptr<trajectory_msgs::JointTrajectory>	jnt_tra_msg_;
-
-    double						read_period_;
-    double						write_period_;
-    double						pub_period_;
-
-    bool						is_moving_;
+    const double				write_period_;
+    const timer_p				read_timer_;
+    const timer_p				write_timer_;
+    const timer_p				publish_timer_;
 };
-}	// namespace dynamixel_workbench_controller
+}	// namespace dynamixel_workbench_controllers

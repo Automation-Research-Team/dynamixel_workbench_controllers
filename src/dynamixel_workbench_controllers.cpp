@@ -26,43 +26,30 @@ namespace dynamixel_workbench_controllers
 ************************************************************************/
 DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
     :rclcpp::Node("dynamixel_workbench_controllers", options),
-     is_joint_state_topic_(ddynamic_reconfigure2::
-			   declare_read_only_parameter<bool>(
-			       this, "use_joint_states_topic", true)),
-     is_cmd_vel_topic_(ddynamic_reconfigure2::
-		       declare_read_only_parameter<bool>(
-			   this, "use_cmd_vel_topic", false)),
-     use_moveit_(ddynamic_reconfigure2::declare_read_only_parameter<bool>(
-		     this, "use_moveit", false)),
-
-     dynamixel_state_list_pub_(create_publisher<dynamixel_states_t>(
-				   "~/dynamixel_state", 100)),
-     joint_states_pub_(is_joint_state_topic_ ?
-		       create_publisher<joint_state_t>("joint_states", 100) :
-		       nullptr),
-     cmd_vel_sub_(is_cmd_vel_topic ?
-		  create_subscription<twist_t>(
-		      "~/cmd_vel", 100,
-		      std::bind(&DynamixelController::commandVelocityCallback,
-				this, std::placeholders::_1)) :
-		  nullptr),
-     trajectory_sub_(create_subscription<twist_t>(
+     dxl_states_pub_(create_publisher<dynamixel_states_t>("~/dynamixel_state",
+							  100)),
+     joint_state_pub_(ddynamic_reconfigure2::declare_read_only_parameter<bool>(
+			  this, "use_joint_states_topic", false) ?
+		      create_publisher<joint_state_t>("joint_states", 100) :
+		      nullptr),
+     twist_sub_(create_subscription<twist_t>(
+		    "~/cmd_vel", 100,
+		    std::bind(&DynamixelController::twistCallback,
+			      this, std::placeholders::_1))),
+     trajectory_sub_(create_subscription<trajectory_t>(
 			 "~/joint_trajectory", 100,
-			 std::bind(&DynamixelController::trajectoryMsgCallback,
+			 std::bind(&DynamixelController::trajectoryCallback,
 				   this, std::placeholders::_1))),
-     dynamixel_command_server_(
+     dxl_command_srv_(
 	 create_service<dynamixel_command_t>(
 	     "~/dynamixel_command",
-	     std::bind(&DynamixelController::dynamixelCommandMsgCallback,
+	     std::bind(&DynamixelController::dynamixelCommandCallback,
 		       this, std::placeholders::_1, std::placeholders::_2))),
 
-     dxl_wb_(new DynamixelWorkbench()),
-     dynamixel_(),
+     dxl_wb_(),
+     dxl_ids_(),
      control_items_(),
-     dynamixel_info_(),
-     dynamixel_state_list_(),
-     joint_state_msg_(),
-     pre_goal_(),
+     dxl_states_(),
 
      wheel_separation_(ddynamic_reconfigure2::
 		       declare_read_only_parameter<double>(
@@ -71,223 +58,198 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 			   0.0)),
      wheel_radius_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
 		       this, "mobile_robot_config.radius_of_wheel", 0.0)),
+     use_moveit_(ddynamic_reconfigure2::declare_read_only_parameter<bool>(
+		     this, "use_moveit", false)),
 
-     jnt_tra_(new JointTrajectory),
-     jnt_tra_msg_(new trajectory_msgs::JointTrajectory),
+     trajectory_(),
+     point_cnt_(0),
+     position_cnt_(0),
+     is_moving_(false),
 
-     read_period_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
-		      this, "dxl_read_period", 0.010)),
      write_period_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
 		       this, "dxl_write_period", 0.010)),
-     pub_period_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
-		     this, "publish_period", 0.010)),
-
-     is_moving_(false)
+     read_timer_(create_wall_timer(
+		     std::chrono::duration<double>(
+			 ddynamic_reconfigure2::
+			 declare_read_only_parameter<double>(
+			     this, "dxl_read_period", 0.010)),
+		     std::bind(&DynamixelController::readCallback, this))),
+     write_timer_(create_wall_timer(
+		      std::chrono::duration<double>(write_period_),
+		      std::bind(&DynamixelController::writeCallback, this))),
+     publish_timer_(create_wall_timer(
+			std::chrono::duration<double>(
+			    ddynamic_reconfigure2::
+			    declare_read_only_parameter<double>(
+				this, "publish_period", 0.010)),
+			std::bind(&DynamixelController::publishCallback,
+				  this)))
 {
-    if (!initWorkbench(ddynamic_reconfigure2::
-		       declare_read_only_parameter<std::string>(
-			   this, "port_name", "/dev/ttyUSB1"),
-		       ddynamic_reconfigure2::
-		       declare_read_only_parameter<uint32_t>(
-			   this, "baud_rate", 1000000))			||
-	!getDynamixelsInfo(ddynamic_reconfigure2::
-			   declare_read_only_parameter<std::string>(
-			       this, "dynamixel_info", ""))		||
-	!loadDynamixels()						||
-	!initSDKHandlers())
+    try
     {
-	RCLCPP_ERROR_STREAM(get_logger(), "Failed Initialization");
+	initWorkbench(ddynamic_reconfigure2::
+		      declare_read_only_parameter<std::string>(
+			  this, "port_name", "/dev/ttyUSB1"),
+		      ddynamic_reconfigure2::declare_read_only_parameter<int>(
+			  this, "baud_rate", 1000000));
+	initDynamixels(ddynamic_reconfigure2::
+		       declare_read_only_parameter<std::string>(
+			   this, "dynamixel_info", ""));
+	initSDKHandlers();
+    }
+    catch (const std::exception& err)
+    {
+	RCLCPP_ERROR_STREAM(get_logger(),
+			    "Failed initialization: " << err.what());
 	return;
     }
 
     RCLCPP_INFO_STREAM(get_logger(), "Started");
 }
 
-bool
+void
 DynamixelController::initWorkbench(const std::string& port_name,
 				   const uint32_t baud_rate)
 {
-    if (const char* log; !dxl_wb_->init(port_name.c_str(), baud_rate, &log))
-    {
-	RCLCPP_ERROR_STREAM(get_logger(), log);
-	return false;
-    }
-
-    return true;
+    if (const char* log; !dxl_wb_.init(port_name.c_str(), baud_rate, &log))
+	throw std::runtime_error(log);
 }
 
-bool
-DynamixelController::getDynamixelsInfo(const std::string& yaml_file)
+void
+DynamixelController::initDynamixels(const std::string& yaml_file)
 {
-    YAML::Node	dynamixel = YAML::LoadFile(yaml_file.c_str());
-
-    if (dynamixel == NULL)
-	return false;
+  // Get Dynamixel IDs and list up setting items for each Dynamixel.
+    std::vector<ItemValue>	item_values;
+    YAML::Node			dynamixel = YAML::LoadFile(yaml_file);
 
     for (YAML::const_iterator it_file = dynamixel.begin();
 	 it_file != dynamixel.end(); ++it_file)
     {
 	if (const auto name = it_file->first.as<std::string>(); name.size())
 	{
-	    YAML::Node			item	= dynamixel[name];
-	    for (YAML::const_iterator	it_item = item.begin();
-		 it_item != item.end(); ++it_item)
+	    YAML::Node	item = dynamixel[name];
+	    for (auto it_item = item.begin(); it_item != item.end(); ++it_item)
 	    {
-		std::string	item_name = it_item->first.as<std::string>();
-		int32_t		value	  = it_item->second.as<int32_t>();
+		const auto	item_name = it_item->first.as<std::string>();
+		const auto	value	  = it_item->second.as<int>();
 
 		if (item_name == "ID")
-		    dynamixel_[name] = uint8_t(value);
+		    dxl_ids_[name] = uint8_t(value);
 
-		ItemValue	item_value = {item_name, value};
-		std::pair<std::string, ItemValue>	info(name, item_value);
-
-		dynamixel_info_.push_back(info);
+		item_values.push_back({name, item_name, value});
 	    }
 	}
     }
 
-    return true;
-}
-
-bool
-DynamixelController::loadDynamixels()
-{
-    for (const auto& dxl : dynamixel_)
+  // Check existence of each Dynamixel with spedified ID.
+    for (const auto& dxl_id : dxl_ids_)
     {
 	uint16_t	model_number = 0;
-	if (const char*	log;
-	    !dxl_wb_->ping(uint8_t(dxl.second), &model_number, &log))
-	{
-	    RCLCPP_ERROR_STREAM(get_logger(),
-				log << ": Can't find Dynamixel ID "
-				    << dxl.second);
-	    return false;
-	}
+	if (const char*	log; !dxl_wb_.ping(dxl_id.second, &model_number, &log))
+	    throw std::runtime_error(std::string(log) +
+				     ": Can't find Dynamixel ID " +
+				     std::to_string(dxl_id.second));
 
 	RCLCPP_INFO_STREAM(get_logger(),
-			   "Name : " << dxl.first << ", ID : " << dxl.second
+			   "Name : " << dxl_id.first
+			   << ", ID : " << dxl_id.second
 			   << ", Model Number : " << model_number);
     }
 
-    return true;
-}
-
-bool
-DynamixelController::initDynamixels()
-{
-    for (const auto& dxl : dynamixel_)
+  // Set values specified in YAML to items for each Dynamixel.
+    for (const auto& dxl_id : dxl_ids_)
     {
-	dxl_wb_->torqueOff((uint8_t)dxl.second);
+	dxl_wb_.torqueOff(dxl_id.second);
 
-	for (const auto& info : dynamixel_info_)
+	for (const auto& item_value : item_values)
 	{
 	    if (const char* log;
-		dxl.first == info.first &&
-		info.second.item_name != "ID" &&
-		info.second.item_name != "Baud_Rate" &&
-		!dxl_wb_->itemWrite(dxl.second,
-				    info.second.item_name.c_str(),
-				    info.second.value, &log))
+		dxl_id.first == item_value.dxl_name	&&
+		item_value.item_name != "ID"		&&
+		item_value.item_name != "Baud_Rate"	&&
+		!dxl_wb_.itemWrite(dxl_id.second, item_value.item_name.c_str(),
+				   item_value.value, &log))
 	    {
-		RCLCPP_ERROR_STREAM(get_logger(),
-				    log << ": Failed to write value["
-				    << info.second.value << "] on items["
-				    << info.second.item_name
-				    << "] to Dynamixel[Name : "
-				    << dxl.first << ", ID : "
-				    << dxl.second << ']');
-		return false;
+		throw std::runtime_error(std::string(log) +
+					 ": Failed to write value[" +
+					 std::to_string(item_value.value) +
+					 "] on items[" +
+					 item_value.item_name +
+					 "] to Dynamixel[Name : " +
+					 dxl_id.first + ", ID : " +
+					 std::to_string(dxl_id.second) + ']');
 	    }
 	}
 
-	dxl_wb_->torqueOn((uint8_t)dxl.second);
+	dxl_wb_.torqueOn(dxl_id.second);
     }
-
-    return true;
 }
 
-bool
+void
 DynamixelController::initControlItems()
 {
-    bool result = false;
-    const char* log = NULL;
-
-    auto it = dynamixel_.begin();
-
-    const auto  goal_position = dxl_wb_->getItemInfo(it->second,
-						     "Goal_Position");
+    const auto	dxl_id = dxl_ids_.begin()->second;
+    const auto  goal_position = dxl_wb_.getItemInfo(dxl_id, "Goal_Position");
     if (!goal_position)
-	return false;
-    control_items_["Goal_Position"] = goal_velocity;
+	throw std::runtime_error("Failed to get Goal_Position");
+    control_items_["Goal_Position"] = goal_position;
 
-    const auto	goal_velocity = dxl_wb_->getItemInfo(it->second,
-						    "Goal_Velocity");
+    auto	goal_velocity = dxl_wb_.getItemInfo(dxl_id, "Goal_Velocity");
     if (!goal_velocity)
     {
-	goal_velocity = dxl_wb_->getItemInfo(it->second, "Moving_Speed");
+	goal_velocity = dxl_wb_.getItemInfo(dxl_id, "Moving_Speed");
 	if (!goal_velocity)
-	    return false;
+	    throw std::runtime_error("Failed to get Goal_Velocity");
     }
     control_items_["Goal_Velocity"] = goal_velocity;
 
-    const auto	present_position = dxl_wb_->getItemInfo(it->second,
-							"Present_Position");
+    const auto	present_position = dxl_wb_.getItemInfo(dxl_id,
+						       "Present_Position");
     if (present_position == NULL)
-	return false;
+	throw std::runtime_error("Failed to get Present_Position");
     control_items_["Present_Position"] = present_position;
 
-    const auto	present_velocity = dxl_wb_->getItemInfo(it->second,
-							"Present_Velocity");
+    auto	present_velocity = dxl_wb_.getItemInfo(dxl_id,
+						       "Present_Velocity");
     if (present_velocity == NULL)
     {
-	present_velocity = dxl_wb_->getItemInfo(it->second, "Present_Speed");
+	present_velocity = dxl_wb_.getItemInfo(dxl_id, "Present_Speed");
 	if (present_velocity == NULL)
-	    return false;
+	    throw std::runtime_error("Failed to get Present_Velocity");
     }
     control_items_["Present_Velocity"] = present_velocity;
 
-    const auto	present_current = dxl_wb_->getItemInfo(it->second,
-						       "Present_Current");
+    auto	present_current = dxl_wb_.getItemInfo(dxl_id,
+						      "Present_Current");
     if (present_current == NULL)
     {
-	present_current = dxl_wb_->getItemInfo(it->second, "Present_Load");
+	present_current = dxl_wb_.getItemInfo(dxl_id, "Present_Load");
 	if (present_current == NULL)
-	    return false;
+	    throw std::runtime_error("Failed to get Present_Current");
     }
     control_items_["Present_Current"] = present_current;
-
-    return true;
 }
 
-bool
+void
 DynamixelController::initSDKHandlers()
 {
     const char*	log = NULL;
 
-    if (!dxl_wb_->addSyncWriteHandler(
+    if (!dxl_wb_.addSyncWriteHandler(
 	    control_items_["Goal_Position"]->address,
 	    control_items_["Goal_Position"]->data_length, &log))
-    {
-	RCLCPP_ERROR_STREAM(get_logger(), log);
-	return false;
-    }
+	throw std::runtime_error(log);
     else
 	RCLCPP_INFO_STREAM(get_logger(), log);
 
-    if (!dxl_wb_->addSyncWriteHandler(
+    if (!dxl_wb_.addSyncWriteHandler(
 	    control_items_["Goal_Velocity"]->address,
 	    control_items_["Goal_Velocity"]->data_length, &log))
-    {
-	RCLCPP_ERROR_STREAM(get_logger(), log);
-	return false;
-    }
+	throw std::runtime_error(log);
     else
-    {
 	RCLCPP_INFO_STREAM(get_logger(), log);
-    }
 
-    if (dxl_wb_->getProtocolVersion() == 2.0f)
+    if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
 	uint16_t start_address
 			= std::min(control_items_["Present_Position"]->address,
@@ -302,266 +264,46 @@ DynamixelController::initSDKHandlers()
 			     + control_items_["Present_Current"]->data_length
 			     + 2;
 
-	if (!dxl_wb_->addSyncReadHandler(start_address, read_length, &log))
-	{
-	    RCLCPP_ERROR_STREAM(get_logger(), log);
-	    return false;
-	}
+	if (!dxl_wb_.addSyncReadHandler(start_address, read_length, &log))
+	    throw std::runtime_error(log);
     }
-
-    return true;
 }
 
-bool
-DynamixelController::getPresentPosition(const std::vector<std::string>& dxl_name)
-{
-    if (dxl_wb_->getProtocolVersion() == 2.0f)
-    {
-	std::vector<uint8_t>	id_array;
-	for (const auto& name : dxl_name)
-	    id_array.push_back(dynamixel_[name]);
-
-	std::vector<int32_t>	get_position(id_array.size());
-	if (!dxl_wb_->syncRead(
-		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
-		id_array.data(), id_array.size(), &log)			||
-	    !dxl_wb_->getSyncReadData(
-		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
-		id_array.data(), id_array.size(),
-		control_items_["Present_Position"]->address,
-		control_items_["Present_Position"]->data_length,
-		get_position.data(), &log))
-	{
-	    RCLCPP_ERROR_STREAM(get_logger(), log);
-	    return false;
-	}
-
-	for(uint8_t index = 0; index < id_array.size(); ++index)
-	{
-	    WayPoint	wp;
-
-	    wp.position	= dxl_wb_->convertValue2Radian(id_array[index],
-						       get_position[index]);
-	    wp.velocity	= 0.0f;
-	    wp.acceleration = 0.0f;
-	    pre_goal_.push_back(wp);
-	}
-    }
-    else if (dxl_wb_->getProtocolVersion() == 1.0f)
-    {
-	for (auto const& dxl : dynamixel_)
-	{
-	    uint32_t read_position;
-
-	    if (const char* log;
-		!dxl_wb_->readRegister(
-		    dxl.second,
-		    control_items_["Present_Position"]->address,
-		    control_items_["Present_Position"]->data_length,
-		    &read_position, &log))
-	    {
-		RCLCPP_ERROR_STREAM(get_logger(), log);
-		return false;
-	    }
-
-	    WayPoint	wp;
-	    wp.position	    = dxl_wb_->convertValue2Radian(dxl.second,
-							   read_position);
-	    wp.velocity	    = 0.0f;
-	    wp.acceleration = 0.0f;
-	    pre_goal_.push_back(wp);
-	}
-    }
-
-    return true;
-}
-
+/*!
+ *  Callback for service dynamixel_workbench_msgs::srv::DynamixelCommand
+ */
 void
-DynamixelController::readCallback()
+DynamixelController::dynamixelCommandCallback(
+    const dynamixel_command_req req, dynamixel_command_res res)
 {
-#ifdef DEBUG
-    static double	priv_read_secs = get_clock()->now();
-#endif
-    bool result = false;
-    const char* log = NULL;
-
-    std::vector<dynamixel_state_t>	dynamixel_state(dynamixel_.size());
-    dynamixel_state_list_.dynamixel_state.clear();
-
-    int32_t get_current[dynamixel_.size()];
-    int32_t get_velocity[dynamixel_.size()];
-    int32_t get_position[dynamixel_.size()];
-
-    uint8_t id_array[dynamixel_.size()];
-    uint8_t id_cnt = 0;
-
-    for (auto const& dxl:dynamixel_)
+    if (const char* log;
+	!dxl_wb_.itemWrite(uint8_t(req->id), req->addr_name.c_str(),
+			    int32_t(req->value), &log))
     {
-	dynamixel_state[id_cnt].name = dxl.first;
-	dynamixel_state[id_cnt].id = (uint8_t)dxl.second;
-
-	id_array[id_cnt++] = (uint8_t)dxl.second;
+	RCLCPP_ERROR_STREAM(get_logger(),
+			    log << "Failed to write value[" << req->value
+			    << "] on items[" << req->addr_name
+			    << "] to Dynamixel[ID : " << req->id << ']');
+	res->comm_result = false;
     }
-#ifndef DEBUG
-    if (is_moving_ == false)
-    {
-#endif
-	if (dxl_wb_->getProtocolVersion() == 2.0f)
-	{
-	    result = dxl_wb_->syncRead(SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
-				       id_array,
-				       dynamixel_.size(),
-				       &log);
-	    if (result == false)
-	    {
-		ROS_ERROR("%s", log);
-	    }
-
-	    result = dxl_wb_->getSyncReadData(SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
-					      id_array,
-					      id_cnt,
-					      control_items_["Present_Current"]->address,
-					      control_items_["Present_Current"]->data_length,
-					      get_current,
-					      &log);
-	    if (result == false)
-	    {
-		ROS_ERROR("%s", log);
-	    }
-
-	    result = dxl_wb_->getSyncReadData(SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
-					      id_array,
-					      id_cnt,
-					      control_items_["Present_Velocity"]->address,
-					      control_items_["Present_Velocity"]->data_length,
-					      get_velocity,
-					      &log);
-	    if (result == false)
-	    {
-		ROS_ERROR("%s", log);
-	    }
-
-	    result = dxl_wb_->getSyncReadData(SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
-					      id_array,
-					      id_cnt,
-					      control_items_["Present_Position"]->address,
-					      control_items_["Present_Position"]->data_length,
-					      get_position,
-					      &log);
-	    if (result == false)
-	    {
-		ROS_ERROR("%s", log);
-	    }
-
-	    for(uint8_t index = 0; index < id_cnt; index++)
-	    {
-		dynamixel_state[index].present_current = get_current[index];
-		dynamixel_state[index].present_velocity = get_velocity[index];
-		dynamixel_state[index].present_position = get_position[index];
-
-		dynamixel_state_list_.dynamixel_state.push_back(dynamixel_state[index]);
-	    }
-	}
-	else if(dxl_wb_->getProtocolVersion() == 1.0f)
-	{
-	    uint16_t length_of_data = control_items_["Present_Position"]->data_length +
-		control_items_["Present_Velocity"]->data_length +
-		control_items_["Present_Current"]->data_length;
-	    uint32_t get_all_data[length_of_data];
-	    uint8_t dxl_cnt = 0;
-	    for (auto const& dxl:dynamixel_)
-	    {
-		result = dxl_wb_->readRegister((uint8_t)dxl.second,
-					       control_items_["Present_Position"]->address,
-					       length_of_data,
-					       get_all_data,
-					       &log);
-		if (result == false)
-		{
-		    ROS_ERROR("%s", log);
-		}
-
-		dynamixel_state[dxl_cnt].present_current = DXL_MAKEWORD(get_all_data[4], get_all_data[5]);
-		dynamixel_state[dxl_cnt].present_velocity = DXL_MAKEWORD(get_all_data[2], get_all_data[3]);
-		dynamixel_state[dxl_cnt].present_position = DXL_MAKEWORD(get_all_data[0], get_all_data[1]);
-
-		dynamixel_state_list_.dynamixel_state.push_back(dynamixel_state[dxl_cnt]);
-		dxl_cnt++;
-	    }
-	}
-#ifndef DEBUG
-    }
-#endif
-
-#ifdef DEBUG
-    ROS_WARN("[readCallback] diff_secs : %f", ros::Time::now().toSec() - priv_read_secs);
-    priv_read_secs = ros::Time::now().toSec();
-#endif
+    else
+	res->comm_result = true;
 }
 
+/*!
+ *  Transform the subscribed twist command to the left/right wheel velocities
+ *  and send them to Dynamixels.
+ */
 void
-DynamixelController::publishCallback()
-{
-#ifdef DEBUG
-    static double	priv_pub_secs = get_clock()->now();
-#endif
-    dynamixel_state_list_pub_.publish(dynamixel_state_list_);
-
-    if (is_joint_state_topic_)
-    {
-	joint_state_msg_.header.stamp = get_clock()->now();
-
-	joint_state_msg_.name.clear();
-	joint_state_msg_.position.clear();
-	joint_state_msg_.velocity.clear();
-	joint_state_msg_.effort.clear();
-
-	uint8_t id_cnt = 0;
-	for (const auto& dxl : dynamixel_)
-	{
-	    const auto&	dxl_state = dynamixel_state_list_.dynamixel_state[id_cnt];
-	    const auto	position = dxl_wb_->convertValue2Radian(
-					dxl.second,
-					int32_t(dxl_state.present_position));
-	    const auto	velocity = dxl_wb_->convertValue2Velocity(
-					dxl.second,
-					int32_t(dxl_state.present_velocity));
-	    const auto	effort	 = (dxl_wb_->getProtocolVersion() == 2.0f &&
-				    strcmp(dxl_wb_->getModelName(dxl.second),
-					   "XL-320") ?
-				    dxl_wb_->convertValue2Load(
-					int16_t(dxl_state.present_current)) :
-				    dxl_wb_->convertValue2Current(
-					int16_t(dxl_state.present_current)));
-
-	    joint_state_msg_.name.push_back(dxl.first);
-	    joint_state_msg_.position.push_back(position);
-	    joint_state_msg_.velocity.push_back(velocity);
-	    joint_state_msg_.effort.push_back(effort);
-
-	    ++id_cnt;
-	}
-
-	joint_states_pub_.publish(joint_state_msg_);
-    }
-
-#ifdef DEBUG
-    ROS_WARN("[publishCallback] diff_secs : %f",
-	     (get_clock()->now() - priv_pub_secs).nanoseconds()*1.0e-9);
-    priv_pub_secs = get_clock()->now();
-#endif
-}
-
-void
-DynamixelController::commandVelocityCallback(const twist_cp& twist)
+DynamixelController::twistCallback(const twist_cp& twist)
 {
     std::vector<uint8_t>	id_array;
     float			rpm = 0.0;
-    for (auto const& dxl : dynamixel_)
+    for (auto const& dxl_id : dxl_ids_)
     {
-	const ModelInfo*	modelInfo = dxl_wb_->getModelInfo(dxl.second);
+	const auto*	modelInfo = dxl_wb_.getModelInfo(dxl_id.second);
 	rpm = modelInfo->rpm;
-	id_array.push_back(dxl.second);
+	id_array.push_back(dxl_id.second);
     }
 
   //  V = r * w = r * (RPM * 0.10472) (Change rad/sec to RPM)
@@ -569,8 +311,8 @@ DynamixelController::commandVelocityCallback(const twist_cp& twist)
 
     const uint8_t		LEFT  = 0;
     const uint8_t		RIGHT = 1;
-    std::vector<double>		wheel_velocity[dynamixel_.size()];
-    std::vector<int32_t>	dynamixel_velocity[dynamixel_.size()];
+    std::vector<double>		wheel_velocity(dxl_ids_.size());
+    std::vector<int32_t>	dynamixel_velocity(dxl_ids_.size());
 
     double	velocity_constant_value = 1.0/(wheel_radius_ * rpm * 0.10472);
 
@@ -580,9 +322,9 @@ DynamixelController::commandVelocityCallback(const twist_cp& twist)
     wheel_velocity[RIGHT] = twist->linear.x
 			  + (twist->angular.z * wheel_separation_ / 2);
 
-    if (dxl_wb_->getProtocolVersion() == 2.0f)
+    if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
-	if (strcmp(dxl_wb_->getModelName(id_array[0]), "XL-320") == 0)
+	if (strcmp(dxl_wb_.getModelName(id_array[0]), "XL-320") == 0)
 	{
 	    if (wheel_velocity[LEFT] == 0.0)
 		dynamixel_velocity[LEFT] = 0;
@@ -610,7 +352,7 @@ DynamixelController::commandVelocityCallback(const twist_cp& twist)
 				      * velocity_constant_value;
 	}
     }
-    else if (dxl_wb_->getProtocolVersion() == 1.0f)
+    else if (dxl_wb_.getProtocolVersion() == 1.0f)
     {
 	if (wheel_velocity[LEFT] == 0.0)
 	    dynamixel_velocity[LEFT] = 0;
@@ -632,283 +374,375 @@ DynamixelController::commandVelocityCallback(const twist_cp& twist)
     }
 
     if (const char* log;
-	!dxl_wb_->syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_VELOCITY,
+	!dxl_wb_.syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_VELOCITY,
 			    id_array.data(), id_array.size(),
-			    dynamixel_velocity.data(), 1, &log);
+			    dynamixel_velocity.data(), 1, &log))
     {
 	RCLCPP_ERROR_STREAM(get_logger(), log);
     }
 }
 
+/*!
+ *  Transform the subscribed trajectory command to the waypoints left/right wheel velocities
+ *  and send them to Dynamixels.
+ */
 void
-DynamixelController::writeCallback()
+DynamixelController::trajectoryCallback(const trajectory_cp& trajectory)
 {
-#ifdef DEBUG
-    static auto	priv_pub_secs = get_clock()->now();
-#endif
     if (is_moving_)
     {
-	static uint32_t	point_cnt = 0;
-	static uint32_t position_cnt = 0;
+	RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
+			     "Dynamixel is moving");
+	return;
+    }
 
+    if (use_moveit_)
+    {
+	trajectory_ = *trajectory;
+	return;
+    }
 
-	std::vector<uint8_t>	id_array;
-	for (const auto& joint : jnt_tra_msg_->joint_names)
-	    id_array.push_back(dynamixel_[joint]);
+    try
+    {
+      // Get current joint positions.
+	auto	start = getWayPoints(trajectory->joint_names);
 
-	std::vector<uint32_t>	dynamixel_position;
-	for (uint8_t index = 0; index < id_array.size(); ++index)
-	    dynamixel_position.push_back(
-		dxl_wb_->convertRadian2Value(
-		    id_array[index],
-		    jnt_tra_msg_->points[point_cnt].positions.at(index)));
+	trajectory_.joint_names = trajectory->joint_names;
+	trajectory_.points.clear();
 
-	if (const char* log;
-	    !dxl_wb_->syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_POSITION,
-				id_array.data(), id_array.size(),
-				dynamixel_position, 1, &log))
+	const trajectory_point_t*	prev_point = nullptr;
+	for (const auto& point : trajectory->points)
 	{
-	    RCLCPP_ERROR_STREAM(get_logger(), log);
-	}
-
-	++position_cnt;
-
-	if (position_cnt >= jnt_tra_msg_->points[point_cnt].positions.size())
-	{
-	    point_cnt++;
-	    position_cnt = 0;
-	    if (point_cnt >= jnt_tra_msg_->points.size())
+	  // Convert each point in the given trajectory
+	  // to the array of way points.
+	    std::vector<WayPoint>	goal;
+	    for (size_t i = 0; i < point.positions.size(); ++i)
 	    {
-		is_moving_ = false;
-		point_cnt = 0;
-		position_cnt = 0;
-
-		RCLCPP_INFO_STREAM(get_logger(), "Complete Execution");
-	    }
-	}
-    }
-
-#ifdef DEBUG
-    RCLCPP_WARN_STREAM(get_logger(),
-		       "[writeCallback] diff_secs : "
-		       << (get_clock()->now() - priv_pub_secs).nanoseconds()
-		       * 1.0e-9);
-    priv_pub_secs = get_clock()->now();
-#endif
-}
-
-void
-DynamixelController::trajectoryMsgCallback(
-    const trajectory_msgs::JointTrajectory::ConstPtr &msg)
-{
-
-    if (is_moving_)
-    {
-	RCLCPP_INFO_THROTTLE(get_logger(), 1, "Dynamixel is moving");
-	return;
-    }
-
-    jnt_tra_msg_->joint_names.clear();
-    jnt_tra_msg_->points.clear();
-    pre_goal_.clear();
-
-    if (!getPresentPosition(msg->joint_names))
-    {
-	RCLCPP_ERROR_STREAM(get_logger(),
-			    "Failed to get Present Position");
-	return;
-    }
-
-    for (auto const& joint : msg->joint_names)
-    {
-	RCLCPP_INFO_STREAM(get_logger(),
-			   "Joint '" << joint << "' is ready to move");
-
-	jnt_tra_msg_->joint_names.push_back(joint);
-    }
-
-    if (jnt_tra_msg_->joint_names.size() == 0)
-    {
-	RCLCPP_WARN_STREAM(get_logger(), "Please check joint_name");
-	return;
-    }
-
-
-    for (uint8_t cnt = 0; cnt < msg->points.size(); ++cnt)
-    {
-	std::vector<WayPoint> goal;
-	for (size_t id_num = 0;
-	     id_num < msg->points[cnt].positions.size(); ++id_num)
-	{
-	    WayPoint	wp;
-
-	    wp.position = msg->points[cnt].positions.at(id_num);
-
-	    if (msg->points[cnt].velocities.size())
-		wp.velocity = msg->points[cnt].velocities.at(id_num);
-	    else
-		wp.velocity = 0.0f;
-
-	    if (msg->points[cnt].accelerations.size())
-		wp.acceleration = msg->points[cnt].accelerations.at(id_num);
-	    else
-		wp.acceleration = 0.0f;
-
-	    goal.push_back(wp);
-	}
-
-	if (use_moveit_)
-	{
-	    trajectory_msgs::JointTrajectoryPoint jnt_tra_point_msg;
-
-	    for (uint8_t id_num = 0; id_num < id_cnt; id_num++)
-	    {
-		jnt_tra_point_msg.positions.push_back(goal[id_num].position);
-		jnt_tra_point_msg.velocities.push_back(goal[id_num].velocity);
-		jnt_tra_point_msg.accelerations.push_back(goal[id_num].acceleration);
+		WayPoint	wp;
+		wp.position	= point.positions.at(i);
+		wp.velocity	= (i < point.velocities.size() ?
+				   point.velocities.at(i) : 0.0f);
+		wp.acceleration = (i < point.accelerations.size() ?
+				   point.accelerations.at(i) : 0.0f);
+		goal.push_back(wp);
 	    }
 
-	    jnt_tra_msg_->points.push_back(jnt_tra_point_msg);
-	}
-	else
-	{
-	    jnt_tra_->setJointNum((uint8_t)msg->points[cnt].positions.size());
+	    using Duration = rclcpp::Duration;
 
-	    double move_time = 0.0f;
-	    if (cnt == 0)
-		move_time = msg->points[cnt].time_from_start.toSec();
-	    else
-		move_time = msg->points[cnt].time_from_start.toSec()
-		    - msg->points[cnt-1].time_from_start.toSec();
+	    const auto	move_time = (!prev_point ?
+				     Duration(point.time_from_start) :
+				     Duration(point.time_from_start) -
+				     Duration(prev_point->time_from_start))
+				   .seconds();
 
-	    jnt_tra_->init(move_time, write_period_, pre_goal_, goal);
+	    JointTrajectory	jnt_tra;
+	    jnt_tra.setJointNum(uint8_t(point.positions.size()));
+	    jnt_tra.init(move_time, write_period_, start, goal);
 
-	    std::vector<WayPoint> way_point;
-	    trajectory_msgs::JointTrajectoryPoint jnt_tra_point_msg;
-
-	    for (double index = 0.0;
-		 index < move_time; index = index + write_period_)
+	  // Generate trajectory points every write_period_ up to move_time.
+	    for (double t = 0.0; t < move_time; t += write_period_)
 	    {
-		way_point = jnt_tra_->getJointWayPoint(index);
+		trajectory_point_t	trajectory_point;
 
-		for (uint8_t id_num = 0; id_num < id_cnt; id_num++)
+		for (const auto& wp : jnt_tra.getJointWayPoint(t))
 		{
-		    jnt_tra_point_msg.positions.push_back(way_point[id_num].position);
-		    jnt_tra_point_msg.velocities.push_back(way_point[id_num].velocity);
-		    jnt_tra_point_msg.accelerations.push_back(way_point[id_num].acceleration);
+		    trajectory_point.positions.push_back(wp.position);
+		    trajectory_point.velocities.push_back(wp.velocity);
+		    trajectory_point.accelerations.push_back(wp.acceleration);
 		}
 
-		jnt_tra_msg_->points.push_back(jnt_tra_point_msg);
-		jnt_tra_point_msg.positions.clear();
-		jnt_tra_point_msg.velocities.clear();
-		jnt_tra_point_msg.accelerations.clear();
+		trajectory_.points.push_back(trajectory_point);
 	    }
 
-	    pre_goal_ = goal;
+	    start = goal;
+	    prev_point = &point;
 	}
+    }
+    catch (const std::exception& err)
+    {
+	RCLCPP_ERROR_STREAM(get_logger(), err.what());
     }
 
     RCLCPP_INFO_STREAM(get_logger(), "Succeeded to get joint trajectory!");
     is_moving_ = true;
 }
 
+/*!
+ *  Read Dynamixels' states and store them in this->dxl_states_.
+ */
 void
-DynamixelController::dynamixelCommandMsgCallback(
-    const dynamixel_command_t::Request::SharedPtr req,
-    dynamixel_command_t::Response::SharedPtr res)
+DynamixelController::readCallback()
 {
-    if (const char* log;
-	!dxl_wb_->itemWrite(uint8_t(req->id), req->addr_name.c_str(),
-			    int32_t(req->value), &log))
+    if (!is_moving_)
+	return;
+
+#ifdef DEBUG
+    static double	priv_read_secs = get_clock()->now();
+#endif
+
+    if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
-	RCLCPP_ERROR_STREAM(get_logger,
-			    log << "Failed to write value[" << value
-			    << "] on items[" << item_name
-			    << "] to Dynamixel[ID : " << id ']');
-	res->comm_result = false;
+	std::vector<uint8_t>	id_array;
+	for (const auto& dxl_id : dxl_ids_)
+	    id_array.push_back(dxl_id.second);
+
+	std::vector<int32_t>	currents(id_array.size());
+	std::vector<int32_t>	velocities(id_array.size());
+	std::vector<int32_t>	positions(id_array.size());
+
+	if (const char* log;
+	    !dxl_wb_.syncRead(
+		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
+		id_array.data(), id_array.size(), &log)			||
+	    !dxl_wb_.getSyncReadData(
+		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
+		id_array.data(), id_array.size(),
+		control_items_["Present_Current"]->address,
+		control_items_["Present_Current"]->data_length,
+		currents.data(), &log)				||
+	    !dxl_wb_.getSyncReadData(
+		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
+		id_array.data(), id_array.size(),
+		control_items_["Present_Velocity"]->address,
+		control_items_["Present_Velocity"]->data_length,
+		velocities.data(), &log)				||
+	    !dxl_wb_.getSyncReadData(
+		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
+		id_array.data(), id_array.size(),
+		control_items_["Present_Position"]->address,
+		control_items_["Present_Position"]->data_length,
+		positions.data(), &log))
+	{
+	    RCLCPP_ERROR_STREAM(get_logger(), log);
+	}
+
+	dxl_states_.dynamixel_state.clear();
+
+	for (size_t i = 0; i < id_array.size(); ++i)
+	{
+	    dynamixel_state_t	dynamixel_state;
+	    dynamixel_state.present_position = positions[i];
+	    dynamixel_state.present_velocity = velocities[i];
+	    dynamixel_state.present_current  = currents[i];
+
+	    dxl_states_.dynamixel_state.push_back(dynamixel_state);
+	}
     }
-    else
-	res->comm_result = true;
+    else if (dxl_wb_.getProtocolVersion() == 1.0f)
+    {
+	const auto	length_of_data
+			    = control_items_["Present_Position"]->data_length
+			    + control_items_["Present_Velocity"]->data_length
+			    + control_items_["Present_Current"]->data_length;
+	std::vector<uint32_t>	all_data(length_of_data);
+
+	dxl_states_.dynamixel_state.clear();
+
+	for (const auto& dxl_id : dxl_ids_)
+	{
+	    if (const char* log;
+		!dxl_wb_.readRegister(
+		    dxl_id.second,
+		    control_items_["Present_Position"]->address,
+		    length_of_data, all_data.data(), &log))
+	    {
+		RCLCPP_ERROR_STREAM(get_logger(), log);
+	    }
+
+	    dynamixel_state_t	dynamixel_state;
+	    dynamixel_state.present_position = DXL_MAKEWORD(all_data[0],
+							    all_data[1]);
+	    dynamixel_state.present_velocity = DXL_MAKEWORD(all_data[2],
+							    all_data[3]);
+	    dynamixel_state.present_current  = DXL_MAKEWORD(all_data[4],
+							    all_data[5]);
+
+	    dxl_states_.dynamixel_state.push_back(dynamixel_state);
+	}
+    }
+
+#ifdef DEBUG
+    RCLCPP_WARN_STREAM(get_logger(),
+		       "[readCallback] diff_secs : "
+		       << (get_clock()->now() - priv_read_secs).seconds();
+    priv_read_secs = get_clock->now();
+#endif
 }
 
-int
-main(int argc, char **argv)
+/*!
+ *  Select the oldest but yet written point in the trajectory subscribed
+ *  by trajectoryCallback() and send it to the Dynamixels.
+ */
+void
+DynamixelController::writeCallback()
 {
-    ros::init(argc, argv, "dynamixel_workbench_controllers");
-    ros::NodeHandle node_handle("");
+    if (!is_moving_)
+	return;
 
-    std::string port_name = "/dev/ttyUSB0";
-    uint32_t baud_rate = 57600;
+#ifdef DEBUG
+    static auto	priv_pub_secs = get_clock()->now();
+#endif
 
-    if (argc < 2)
+    std::vector<uint8_t>	id_array;
+    for (const auto& joint_name : trajectory_.joint_names)
+	id_array.push_back(dxl_ids_[joint_name]);
+
+    std::vector<int32_t>	positions;
+    for (size_t i = 0; i < id_array.size(); ++i)
+	positions.push_back(
+	    dxl_wb_.convertRadian2Value(
+		id_array[i],
+		trajectory_.points[point_cnt_].positions.at(i)));
+
+    if (const char* log;
+	!dxl_wb_.syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_POSITION,
+			   id_array.data(), id_array.size(),
+			   positions.data(), 1, &log))
     {
-	ROS_ERROR("Please set '-port_name' and  '-baud_rate' arguments for connected Dynamixels");
-	return 0;
-    }
-    else
-    {
-	port_name = argv[1];
-	baud_rate = atoi(argv[2]);
-    }
-
-    DynamixelController dynamixel_controller;
-
-    bool result = false;
-
-    std::string yaml_file = node_handle.param<std::string>("dynamixel_info", "");
-
-    result = dynamixel_controller.initWorkbench(port_name, baud_rate);
-    if (result == false)
-    {
-	ROS_ERROR("Please check USB port name");
-	return 0;
+	RCLCPP_ERROR_STREAM(get_logger(), log);
     }
 
-    result = dynamixel_controller.getDynamixelsInfo(yaml_file);
-    if (result == false)
+    ++position_cnt_;
+
+    if (position_cnt_ >= trajectory_.points[point_cnt_].positions.size())
     {
-	ROS_ERROR("Please check YAML file");
-	return 0;
+	point_cnt_++;
+	position_cnt_ = 0;
+	if (point_cnt_ >= trajectory_.points.size())
+	{
+	    point_cnt_    = 0;
+	    position_cnt_ = 0;
+	    is_moving_    = false;
+
+	    RCLCPP_INFO_STREAM(get_logger(), "Complete Execution");
+	}
     }
 
-    result = dynamixel_controller.loadDynamixels();
-    if (result == false)
+#ifdef DEBUG
+    RCLCPP_WARN_STREAM(get_logger(),
+		       "[writeCallback] diff_secs : "
+		       << (get_clock()->now() - priv_pub_secs).seconds());
+    priv_pub_secs = get_clock()->now();
+#endif
+}
+
+/*!
+ *  Publish Dynamixels' states and joint state as ROS topics.
+ */
+void
+DynamixelController::publishCallback()
+{
+#ifdef DEBUG
+    static double	priv_pub_secs = get_clock()->now();
+#endif
+  // Publish Dynamixels' states.
+    dxl_states_pub_->publish(dxl_states_);
+
+  // Publish joint state.
+    if (joint_state_pub_)
     {
-	ROS_ERROR("Please check Dynamixel ID or BaudRate");
-	return 0;
+	joint_state_t	joint_state;
+	joint_state.header.stamp = get_clock()->now();
+
+	auto	dxl_state = dxl_states_.dynamixel_state.cbegin();
+	for (const auto& dxl_id : dxl_ids_)
+	{
+	    const auto	position = dxl_wb_.convertValue2Radian(
+					dxl_id.second,
+					int32_t(dxl_state->present_position));
+	    const auto	velocity = dxl_wb_.convertValue2Velocity(
+					dxl_id.second,
+					int32_t(dxl_state->present_velocity));
+	    const auto	effort	 = (dxl_wb_.getProtocolVersion() == 2.0f &&
+				    strcmp(dxl_wb_.getModelName(dxl_id.second),
+					   "XL-320") ?
+				    dxl_wb_.convertValue2Load(
+					int16_t(dxl_state->present_current)) :
+				    dxl_wb_.convertValue2Current(
+					int16_t(dxl_state->present_current)));
+
+	    joint_state.name.push_back(dxl_id.first);
+	    joint_state.position.push_back(position);
+	    joint_state.velocity.push_back(velocity);
+	    joint_state.effort.push_back(effort);
+
+	    ++dxl_state;
+	}
+
+	joint_state_pub_->publish(joint_state);
     }
 
-    result = dynamixel_controller.initDynamixels();
-    if (result == false)
+#ifdef DEBUG
+    RCLCPP_WARN_STREAM(get_logger(), "[publishCallback] diff_secs : "
+		       << (get_clock()->now() - priv_pub_secs).seconds());
+    priv_pub_secs = get_clock()->now();
+#endif
+}
+
+std::vector<WayPoint>
+DynamixelController::getWayPoints(const std::vector<std::string>& joint_names)
+{
+    std::vector<uint8_t>	id_array;
+    for (const auto& joint_name : joint_names)
+	id_array.push_back(dxl_ids_[joint_name]);
+
+    std::vector<WayPoint>	way_points;
+    if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
-	ROS_ERROR("Please check control table (http://emanual.robotis.com/#control-table)");
-	return 0;
+	std::vector<int32_t>	positions(id_array.size());
+	if (const char* log;
+	    !dxl_wb_.syncRead(
+		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
+		id_array.data(), id_array.size(), &log)			||
+	    !dxl_wb_.getSyncReadData(
+		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
+		id_array.data(), id_array.size(),
+		control_items_["Present_Position"]->address,
+		control_items_["Present_Position"]->data_length,
+		positions.data(), &log))
+	{
+	    throw std::runtime_error(log);
+	}
+
+	for(size_t i = 0; id_array.size(); ++i)
+	{
+	    WayPoint	wp;
+	    wp.position	    = dxl_wb_.convertValue2Radian(id_array[i],
+							  positions[i]);
+	    wp.velocity	    = 0.0f;
+	    wp.acceleration = 0.0f;
+	    way_points.push_back(wp);
+	}
+    }
+    else if (dxl_wb_.getProtocolVersion() == 1.0f)
+    {
+	for (const auto id : id_array)
+	{
+	    uint32_t position;
+
+	    if (const char* log;
+		!dxl_wb_.readRegister(
+		    id,
+		    control_items_["Present_Position"]->address,
+		    control_items_["Present_Position"]->data_length,
+		    &position, &log))
+	    {
+		throw std::runtime_error(log);
+	    }
+
+	    WayPoint	wp;
+	    wp.position	    = dxl_wb_.convertValue2Radian(id, position);
+	    wp.velocity	    = 0.0f;
+	    wp.acceleration = 0.0f;
+	    way_points.push_back(wp);
+	}
     }
 
-    result = dynamixel_controller.initControlItems();
-    if (result == false)
-    {
-	ROS_ERROR("Please check control items");
-	return 0;
-    }
-
-    result = dynamixel_controller.initSDKHandlers();
-    if (result == false)
-    {
-	ROS_ERROR("Failed to set Dynamixel SDK Handler");
-	return 0;
-    }
-
-    dynamixel_controller.initPublisher();
-    dynamixel_controller.initSubscriber();
-    dynamixel_controller.initServer();
-
-    ros::Timer read_timer = node_handle.createTimer(ros::Duration(dynamixel_controller.getReadPeriod()), &DynamixelController::readCallback, &dynamixel_controller);
-    ros::Timer write_timer = node_handle.createTimer(ros::Duration(dynamixel_controller.getWritePeriod()), &DynamixelController::writeCallback, &dynamixel_controller);
-    ros::Timer publish_timer = node_handle.createTimer(ros::Duration(dynamixel_controller.getPublishPeriod()), &DynamixelController::publishCallback, &dynamixel_controller);
-
-    ros::spin();
-
-    return 0;
+    return way_points;
 }
 }	// namespace dynamixel_workbench_controllers
+
+#include <rclcpp_components/register_node_macro.hpp>
+
+RCLCPP_COMPONENTS_REGISTER_NODE(
+    dynamixel_workbench_controllers::DynamixelController)
