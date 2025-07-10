@@ -120,8 +120,8 @@ class DynamixelController : public rclcpp::Node
 
     double					wheel_separation_;
     double					wheel_radius_;
-    const bool					use_moveit_;
 
+    const bool					use_moveit_;
     trajectory_t				trajectory_;
     size_t					point_cnt_;
     size_t					position_cnt_;
