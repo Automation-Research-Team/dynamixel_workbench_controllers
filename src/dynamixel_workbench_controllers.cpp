@@ -89,9 +89,9 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
     {
 	initWorkbench(ddynamic_reconfigure2::
 		      declare_read_only_parameter<std::string>(
-			  this, "port_name", "/dev/ttyUSB1"),
+			  this, "usb_port", "/dev/ttyUSB0"),
 		      ddynamic_reconfigure2::declare_read_only_parameter<int>(
-			  this, "baud_rate", 1000000));
+			  this, "dxl_baud_rate", 1000000));
 	initDynamixels(ddynamic_reconfigure2::
 		       declare_read_only_parameter<std::string>(
 			   this, "dynamixel_info", ""));
@@ -99,7 +99,8 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
     }
     catch (const std::exception& err)
     {
-	RCLCPP_ERROR_STREAM(get_logger(), err.what());
+	RCLCPP_ERROR_STREAM(get_logger(),
+			    "Initialization failed: " << err.what());
 	return;
     }
 
@@ -118,24 +119,25 @@ void
 DynamixelController::initDynamixels(const std::string& yaml_file)
 {
   // Get Dynamixel IDs and list up setting items for each Dynamixel.
-    std::vector<ItemValue>	item_values;
-    YAML::Node			dynamixel = YAML::LoadFile(yaml_file);
+    std::vector<Item>	items;
+    YAML::Node		dynamixel = YAML::LoadFile(yaml_file);
 
     for (auto it_file = dynamixel.begin(); it_file != dynamixel.end();
 	 ++it_file)
     {
-	if (const auto name = it_file->first.as<std::string>(); name.size())
+	const auto	dxl_name = it_file->first.as<std::string>();
+	if (dxl_name.size())
 	{
-	    YAML::Node	item = dynamixel[name];
+	    YAML::Node	item = dynamixel[dxl_name];
 	    for (auto it_item = item.begin(); it_item != item.end(); ++it_item)
 	    {
-		const auto	item_name = it_item->first.as<std::string>();
-		const auto	value	  = it_item->second.as<int>();
+		const auto	name  = it_item->first.as<std::string>();
+		const auto	value = it_item->second.as<int>();
 
-		if (item_name == "ID")
-		    dxl_ids_[name] = uint8_t(value);
+		if (name == "ID")
+		    dxl_ids_[dxl_name] = uint8_t(value);
 
-		item_values.push_back({name, item_name, value});
+		items.push_back({dxl_name, name, value});
 	    }
 	}
     }
@@ -160,20 +162,19 @@ DynamixelController::initDynamixels(const std::string& yaml_file)
     {
 	dxl_wb_.torqueOff(dxl_id.second);
 
-	for (const auto& item_value : item_values)
+	for (const auto& item : items)
 	{
 	    if (const char* log;
-		dxl_id.first == item_value.dxl_name	&&
-		item_value.item_name != "ID"		&&
-		item_value.item_name != "Baud_Rate"	&&
-		!dxl_wb_.itemWrite(dxl_id.second, item_value.item_name.c_str(),
-				   item_value.value, &log))
+		dxl_id.first == item.dxl_name	&&
+		item.name != "ID"		&&
+		item.name != "Baud_Rate"	&&
+		!dxl_wb_.itemWrite(dxl_id.second, item.name.c_str(),
+				   item.value, &log))
 	    {
 		throw std::runtime_error(std::string(log) +
 					 ": Failed to write value[" +
-					 std::to_string(item_value.value) +
-					 "] on items[" +
-					 item_value.item_name +
+					 std::to_string(item.value) +
+					 "] on items[" + item.name +
 					 "] to Dynamixel[Name : " +
 					 dxl_id.first + ", ID : " +
 					 std::to_string(dxl_id.second) + ']');

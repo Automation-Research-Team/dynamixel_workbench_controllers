@@ -75,10 +75,10 @@ class DynamixelController : public rclcpp::Node
     using service_p		= typename rclcpp::Service<SRV>::SharedPtr;
     using timer_p		= rclcpp::TimerBase::SharedPtr;
 
-    struct ItemValue
+    struct Item
     {
 	std::string	dxl_name;
-	std::string	item_name;
+	std::string	name;
 	int32_t		value;
     };
 

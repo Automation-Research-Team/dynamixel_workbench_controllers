@@ -1,4 +1,4 @@
-import yaml
+import yaml, os
 from launch                   import LaunchDescription
 from launch.actions           import (DeclareLaunchArgument, OpaqueFunction,
                                       GroupAction)
@@ -7,13 +7,15 @@ from launch.substitutions     import (LaunchConfiguration,
 from launch.conditions        import IfCondition, UnlessCondition
 from launch_ros.actions       import Node, LoadComposableNodes
 from launch_ros.descriptions  import ComposableNode
+from launch_ros.substitutions import FindPackageShare
+from ament_index_python.packages import get_package_share_directory
 
 launch_arguments = [
     {'name':        'namespace',
      'default':     '',
      'description': 'namespace for the controller'},
     {'name':        'name',
-     'default':     'dynamixel_workbench',
+     'default':     'screw_tools_driver',
      'description': 'name of the controller'},
     {'name':        'config_file',
      'default':     '',
@@ -36,9 +38,9 @@ parameter_arguments = [
      'default':     '/dev/ttyUSB0',
      'description': 'device file name of the USB port'},
     {'name':        'dxl_baud_rate',
-     'default':     '57600',
+     'default':     '1000000',
      'description': 'baud rate of the Dynamixel'},
-    {'name':        'use_joint_state_topic',
+    {'name':        'use_joint_states_topic',
      'default':     'false',
      'description': 'publish joint state'},
     {'name':        'use_moveit',
@@ -67,9 +69,12 @@ def set_configurable_parameters(args):
 def launch_setup(context, param_args):
     params   = load_parameters(
                    LaunchConfiguration('config_file').perform(context))
-    actions  = declare_launch_arguments(param_args, params)
-    params  |= set_configurable_parameters(param_args)
-    actions += [Node(namespace=LaunchConfiguration('namespace'),
+    #params   = os.path.join(get_package_share_directory('dynamixel_workbench_controllers'), 'config', 'test.yaml')
+    params   = PathJoinSubstitution([FindPackageShare('dynamixel_workbench_controllers'), 'config', 'test.yaml'])
+    # actions  = declare_launch_arguments(param_args, params)
+    # params  |= set_configurable_parameters(param_args)
+    print(params)
+    actions  'PathJoinSubstitution' object has no attribute 'get'= [Node(namespace=LaunchConfiguration('namespace'),
                      name=LaunchConfiguration('name'),
                      package='dynamixel_workbench_controllers',
                      executable='dynamixel_workbench_controllers_node',

@@ -1,0 +1,19 @@
+screw_tools_driver:
+  ros__parameters:
+    usb_port:               /dev/ttyUSB0
+    dxl_baud_rate:          1000000
+    dxl_read_period:        0.010
+    dxl_write_period:       0.010
+    publish_period:         0.010
+    use_joint_states_topic: true
+    use_moveit:             false
+
+precision_tools_driver:
+  ros__parameters:
+    usb_port:               /dev/ttyUSB0
+    dxl_baud_rate:          57600
+    dxl_read_period:        0.010
+    dxl_write_period:       0.010
+    publish_period:         0.010
+    use_joint_states_topic: false
+    use_moveit:             false
