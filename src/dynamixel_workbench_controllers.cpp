@@ -94,6 +94,7 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 	initDynamixels(ddynamic_reconfigure2::
 		       declare_read_only_parameter<std::string>(
 			   this, "dynamixel_info", ""));
+	initControlItems();
 	initSDKHandlers();
     }
     catch (const std::exception& err)
@@ -148,12 +149,12 @@ DynamixelController::initDynamixels(const std::string& yaml_file)
 	if (const char*	log; !dxl_wb_.ping(dxl_id.second, &model_number, &log))
 	    throw std::runtime_error(std::string(log) +
 				     ": Can't find Dynamixel ID " +
-				     std::to_string(dxl_id.second));
+				     std::to_string(int(dxl_id.second)));
 
 	RCLCPP_INFO_STREAM(get_logger(),
-			   "Name : " << dxl_id.first
-			   << ", ID : " << dxl_id.second
-			   << ", Model Number : " << model_number);
+			   "Name: " << dxl_id.first
+			   << ", ID: " << int(dxl_id.second)
+			   << ", Model Number: " << model_number);
     }
 
   // Set values specified in YAML to items for each Dynamixel.
@@ -173,10 +174,11 @@ DynamixelController::initDynamixels(const std::string& yaml_file)
 		throw std::runtime_error(std::string(log) +
 					 ": Failed to write value[" +
 					 std::to_string(item.value) +
-					 "] on items[" + item.name +
-					 "] to Dynamixel[Name : " +
-					 dxl_id.first + ", ID : " +
-					 std::to_string(dxl_id.second) + ']');
+					 "] on item[" + item.name +
+					 "] to Dynamixel[Name: " +
+					 dxl_id.first + ", ID: " +
+					 std::to_string(int(dxl_id.second)) +
+					 ']');
 	    }
 	}
 
@@ -264,15 +266,24 @@ void
 DynamixelController::dynamixelCommandCallback(
     const dynamixel_command_req req, dynamixel_command_res res)
 {
+    RCLCPP_INFO_STREAM(get_logger(),
+		       "Received command to set value[" << req->value
+		       << "] to item[" << req->addr_name
+		       << "] of Dynamixel[" << int(req->id) << ']');
+
     if (const char* log;
 	!(res->comm_result = dxl_wb_.itemWrite(req->id, req->addr_name.c_str(),
 					       req->value, &log)))
     {
 	RCLCPP_ERROR_STREAM(get_logger(),
-			    log << "Failed to write value[" << req->value
-			    << "] on items[" << req->addr_name
-			    << "] to Dynamixel[ID : " << req->id << ']');
+			    "Failed to write value[" << req->value
+			    << "] to item[" << req->addr_name
+			    << "] of Dynamixel[" << int(req->id)
+			    << "](" << log << ')');
+	res->comm_result = false;
     }
+    else
+	res->comm_result = true;
 }
 
 /*!
@@ -464,9 +475,13 @@ DynamixelController::readDynamixelStatesCallback()
     dynamixel_states_t	dxl_states;
     if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
-	std::vector<uint8_t>	id_array;
+	std::vector<std::string>	name_array;
+	std::vector<uint8_t>		id_array;
 	for (const auto& dxl_id : dxl_ids_)
+	{
+	    name_array.push_back(dxl_id.first);
 	    id_array.push_back(dxl_id.second);
+	}
 
 	std::vector<int32_t>	currents(id_array.size());
 	std::vector<int32_t>	velocities(id_array.size());
@@ -503,6 +518,8 @@ DynamixelController::readDynamixelStatesCallback()
 	for (size_t i = 0; i < id_array.size(); ++i)
 	{
 	    dynamixel_state_t	dynamixel_state;
+	    dynamixel_state.name	     = name_array[i];
+	    dynamixel_state.id		     = id_array[i];
 	    dynamixel_state.present_position = positions[i];
 	    dynamixel_state.present_velocity = velocities[i];
 	    dynamixel_state.present_current  = currents[i];
@@ -531,6 +548,8 @@ DynamixelController::readDynamixelStatesCallback()
 	    }
 
 	    dynamixel_state_t	dynamixel_state;
+	    dynamixel_state.name	     = dxl_id.first;
+	    dynamixel_state.id		     = dxl_id.second;
 	    dynamixel_state.present_position = DXL_MAKEWORD(all_data[0],
 							    all_data[1]);
 	    dynamixel_state.present_velocity = DXL_MAKEWORD(all_data[2],
@@ -547,7 +566,7 @@ DynamixelController::readDynamixelStatesCallback()
 
     if (!joint_state_pub_)
 	return;
-    
+
   // Convert Dynamixels' states to joint state and publish it.
     joint_state_t	joint_state;
     joint_state.header.stamp = get_clock()->now();
