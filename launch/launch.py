@@ -88,7 +88,7 @@ def launch_setup(context, param_args):
                 actions=[
                     Node(name=LaunchConfiguration('container'),
                          package='rclcpp_components',
-                         executable='component_container',
+                         executable='component_container_mt',
                          output=LaunchConfiguration('output'),
                          arguments=['--ros-args', '--log-level',
                                     LaunchConfiguration('log_level')],

@@ -68,6 +68,7 @@ class DynamixelController : public rclcpp::Node
 					const_iterator;
     using joint_state_t		= sensor_msgs::msg::JointState;
 
+    using callback_group_p	= rclcpp::CallbackGroup::SharedPtr;
     template <class MSG>
     using publisher_p		= typename rclcpp::Publisher<MSG>::SharedPtr;
     template <class MSG>
@@ -119,15 +120,19 @@ class DynamixelController : public rclcpp::Node
     const bool					use_moveit_;
     trajectory_t				trajectory_;
     trajectory_point_iter			current_point_;
+    std::mutex					current_point_mtx_;
 
   // ROS service, subscribers, publishers and timers
+    const callback_group_p			dxl_command_callback_group_;
     const service_p<dynamixel_command_t>	dxl_command_srv_;
     const subscription_p<twist_t>		twist_sub_;
     const subscription_p<trajectory_t>		trajectory_sub_;
     const publisher_p<dynamixel_states_t>	dxl_states_pub_;
     const publisher_p<joint_state_t>		joint_state_pub_;
-    const double				write_period_;
+    const callback_group_p			read_timer_callback_group_;
     const timer_p				read_timer_;
+    const double				write_period_;
+    const callback_group_p			write_timer_callback_group_;
     const timer_p				write_timer_;
 };
 }	// namespace dynamixel_workbench_controllers

@@ -45,16 +45,21 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
      trajectory_(),
      current_point_(trajectory_.points.end()),
 
+     dxl_command_callback_group_(
+	 create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
      dxl_command_srv_(create_service<dynamixel_command_t>(
 			  "~/dynamixel_command",
 			  std::bind(
 			      &DynamixelController::dynamixelCommandCallback,
 			      this,
-			      std::placeholders::_1, std::placeholders::_2))),
-     twist_sub_(create_subscription<twist_t>(
+			      std::placeholders::_1, std::placeholders::_2),
+			  rclcpp::ServicesQoS(), dxl_command_callback_group_)),
+     twist_sub_(wheel_separation_ > 0.0 && wheel_radius_ > 0.0 ?
+		create_subscription<twist_t>(
 		    "~/cmd_vel", 100,
 		    std::bind(&DynamixelController::twistCallback,
-			      this, std::placeholders::_1))),
+			      this, std::placeholders::_1)) :
+		nullptr),
      trajectory_sub_(create_subscription<trajectory_t>(
 			 "~/joint_trajectory", 100,
 			 std::bind(&DynamixelController::trajectoryCallback,
@@ -66,8 +71,8 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 		      create_publisher<joint_state_t>("joint_states", 100) :
 		      nullptr),
 
-     write_period_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
-		       this, "dxl_write_period", 0.010)),
+     read_timer_callback_group_(
+	 create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
      read_timer_(create_wall_timer(
 		     std::chrono::duration<double>(
 			 ddynamic_reconfigure2::
@@ -75,12 +80,18 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 			     this, "dxl_read_period", 0.010)),
 		     std::bind(
 			 &DynamixelController::readDynamixelStatesCallback,
-			 this))),
+			 this),
+		     read_timer_callback_group_)),
+     write_period_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
+		       this, "dxl_write_period", 0.010)),
+     write_timer_callback_group_(
+	 create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
      write_timer_(create_wall_timer(
 		      std::chrono::duration<double>(write_period_),
 		      std::bind(
 			  &DynamixelController::writeTrajectoryPointCallback,
-			  this)))
+			  this),
+		      write_timer_callback_group_))
 {
     try
     {
@@ -380,6 +391,8 @@ DynamixelController::twistCallback(const twist_p& twist)
 void
 DynamixelController::trajectoryCallback(const trajectory_p& trajectory)
 {
+    const std::lock_guard<std::mutex>	lock(current_point_mtx_);
+
     if (current_point_ != trajectory_.points.end())
     {
 	RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 1000,
@@ -604,6 +617,8 @@ DynamixelController::readDynamixelStatesCallback()
 void
 DynamixelController::writeTrajectoryPointCallback()
 {
+    const std::lock_guard<std::mutex>	lock(current_point_mtx_);
+
     if (current_point_ == trajectory_.points.end())	// Not moving?
 	return;
 
@@ -652,7 +667,7 @@ DynamixelController::getWayPoints(const std::vector<std::string>& joint_names)
 	    throw std::runtime_error(log);
 	}
 
-	for(size_t i = 0; id_array.size(); ++i)
+	for (size_t i = 0; id_array.size(); ++i)
 	{
 	    WayPoint	wp;
 	    wp.position	    = dxl_wb_.convertValue2Radian(id_array[i],
