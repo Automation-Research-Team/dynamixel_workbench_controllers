@@ -91,7 +91,6 @@ class DynamixelController : public rclcpp::Node
 			      const uint32_t baud_rate)			;
     void	initDynamixels(const std::string& yaml_file)		;
     void	initControlItems()					;
-    void	initSDKHandlers()					;
 
     void	dynamixelCommandCallback(const dynamixel_command_req req,
 					 dynamixel_command_res res)	;
@@ -108,8 +107,6 @@ class DynamixelController : public rclcpp::Node
   // Dynamixel Workbench
     DynamixelWorkbench				dxl_wb_;
     std::map<std::string, uint8_t>		dxl_ids_;
-    const ControlItem*				dxl_goal_position_;
-    const ControlItem*				dxl_goal_velocity_;
     const ControlItem*				dxl_present_position_;
     const ControlItem*				dxl_present_velocity_;
     const ControlItem*				dxl_present_current_;

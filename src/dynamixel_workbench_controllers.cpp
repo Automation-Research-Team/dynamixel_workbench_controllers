@@ -28,8 +28,6 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
     :rclcpp::Node("dynamixel_workbench_controllers", options),
      dxl_wb_(),
      dxl_ids_(),
-     dxl_goal_position_(nullptr),
-     dxl_goal_velocity_(nullptr),
      dxl_present_position_(nullptr),
      dxl_present_velocity_(nullptr),
      dxl_present_current_(nullptr),
@@ -95,7 +93,6 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 		       declare_read_only_parameter<std::string>(
 			   this, "dynamixel_info", ""));
 	initControlItems();
-	initSDKHandlers();
     }
     catch (const std::exception& err)
     {
@@ -190,22 +187,40 @@ void
 DynamixelController::initControlItems()
 {
     const auto	dxl_id = dxl_ids_.begin()->second;
-    dxl_goal_position_ = dxl_wb_.getItemInfo(dxl_id, "Goal_Position");
-    if (!dxl_goal_position_)
-	throw std::runtime_error("Failed to get Goal_Position");
+    const char*	log = nullptr;
 
-    dxl_goal_velocity_ = dxl_wb_.getItemInfo(dxl_id, "Goal_Velocity");
-    if (!dxl_goal_velocity_)
+  // Add a write handler for Goal_Position
+    const auto	dxl_goal_position = dxl_wb_.getItemInfo(dxl_id,
+							"Goal_Position");
+    if (!dxl_goal_position)
+	throw std::runtime_error("Failed to get Goal_Position");
+    if (!dxl_wb_.addSyncWriteHandler(dxl_goal_position->address,
+				     dxl_goal_position->data_length, &log))
+	throw std::runtime_error(log);
+    else
+	RCLCPP_INFO_STREAM(get_logger(), log);
+
+  // Add a write handler for Goal_Velocity
+    auto	dxl_goal_velocity = dxl_wb_.getItemInfo(dxl_id,
+							"Goal_Velocity");
+    if (!dxl_goal_velocity)
     {
-	dxl_goal_velocity_ = dxl_wb_.getItemInfo(dxl_id, "Moving_Speed");
-	if (!dxl_goal_velocity_)
+	dxl_goal_velocity = dxl_wb_.getItemInfo(dxl_id, "Moving_Speed");
+	if (!dxl_goal_velocity)
 	    throw std::runtime_error("Failed to get Goal_Velocity");
     }
+    if (!dxl_wb_.addSyncWriteHandler(dxl_goal_velocity->address,
+				     dxl_goal_velocity->data_length, &log))
+	throw std::runtime_error(log);
+    else
+	RCLCPP_INFO_STREAM(get_logger(), log);
 
+  // Initialize control item for Present_Position
     dxl_present_position_ = dxl_wb_.getItemInfo(dxl_id, "Present_Position");
     if (!dxl_present_position_)
 	throw std::runtime_error("Failed to get Present_Position");
 
+  // Initialize control item for Present_Velocity
     dxl_present_velocity_ = dxl_wb_.getItemInfo(dxl_id, "Present_Velocity");
     if (!dxl_present_velocity_)
     {
@@ -214,6 +229,7 @@ DynamixelController::initControlItems()
 	    throw std::runtime_error("Failed to get Present_Velocity");
     }
 
+  // Initialize control item for Present_Current
     dxl_present_current_ = dxl_wb_.getItemInfo(dxl_id, "Present_Current");
     if (!dxl_present_current_)
     {
@@ -221,24 +237,6 @@ DynamixelController::initControlItems()
 	if (!dxl_present_current_)
 	    throw std::runtime_error("Failed to get Present_Current");
     }
-}
-
-void
-DynamixelController::initSDKHandlers()
-{
-    const char*	log = nullptr;
-
-    if (!dxl_wb_.addSyncWriteHandler(dxl_goal_position_->address,
-				     dxl_goal_position_->data_length, &log))
-	throw std::runtime_error(log);
-    else
-	RCLCPP_INFO_STREAM(get_logger(), log);
-
-    if (!dxl_wb_.addSyncWriteHandler(dxl_goal_velocity_->address,
-				     dxl_goal_velocity_->data_length, &log))
-	throw std::runtime_error(log);
-    else
-	RCLCPP_INFO_STREAM(get_logger(), log);
 
     if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
@@ -472,7 +470,7 @@ DynamixelController::readDynamixelStatesCallback()
     // 	return;
 
   // Read Dynamixels' states and convert them to DynamixelStateList message.
-    dynamixel_states_t	dxl_states;
+    auto	dxl_states = std::make_unique<dynamixel_states_t>();
     if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
 	std::vector<std::string>	name_array;
@@ -513,7 +511,7 @@ DynamixelController::readDynamixelStatesCallback()
 	    RCLCPP_ERROR_STREAM(get_logger(), log);
 	}
 
-	dxl_states.dynamixel_state.clear();
+	dxl_states->dynamixel_state.clear();
 
 	for (size_t i = 0; i < id_array.size(); ++i)
 	{
@@ -524,7 +522,7 @@ DynamixelController::readDynamixelStatesCallback()
 	    dynamixel_state.present_velocity = velocities[i];
 	    dynamixel_state.present_current  = currents[i];
 
-	    dxl_states.dynamixel_state.push_back(dynamixel_state);
+	    dxl_states->dynamixel_state.push_back(dynamixel_state);
 	}
     }
     else if (dxl_wb_.getProtocolVersion() == 1.0f)
@@ -535,7 +533,7 @@ DynamixelController::readDynamixelStatesCallback()
 				    + dxl_present_current_->data_length;
 	std::vector<uint32_t>	all_data(length_of_data);
 
-	dxl_states.dynamixel_state.clear();
+	dxl_states->dynamixel_state.clear();
 
 	for (const auto& dxl_id : dxl_ids_)
 	{
@@ -557,30 +555,26 @@ DynamixelController::readDynamixelStatesCallback()
 	    dynamixel_state.present_current  = DXL_MAKEWORD(all_data[4],
 							    all_data[5]);
 
-	    dxl_states.dynamixel_state.push_back(dynamixel_state);
+	    dxl_states->dynamixel_state.push_back(dynamixel_state);
 	}
     }
 
-  // Publish Dynamixels' states.
-    dxl_states_pub_->publish(dxl_states);
-
-    if (!joint_state_pub_)
-	return;
-
-  // Convert Dynamixels' states to joint state and publish it.
-    joint_state_t	joint_state;
-    joint_state.header.stamp = get_clock()->now();
-
-    auto	dxl_state = dxl_states.dynamixel_state.cbegin();
-    for (const auto& dxl_id : dxl_ids_)
+    if (joint_state_pub_)
     {
-	const auto	position = dxl_wb_.convertValue2Radian(
+      // Convert Dynamixels' states to joint state and publish it.
+	auto	joint_state = std::make_unique<joint_state_t>();
+	joint_state->header.stamp = get_clock()->now();
+
+	auto	dxl_state = dxl_states->dynamixel_state.cbegin();
+	for (const auto& dxl_id : dxl_ids_)
+	{
+	    const auto	position = dxl_wb_.convertValue2Radian(
 					dxl_id.second,
 					int32_t(dxl_state->present_position));
-	const auto	velocity = dxl_wb_.convertValue2Velocity(
+	    const auto	velocity = dxl_wb_.convertValue2Velocity(
 					dxl_id.second,
 					int32_t(dxl_state->present_velocity));
-	const auto	effort	 = (dxl_wb_.getProtocolVersion() == 2.0f &&
+	    const auto	effort	 = (dxl_wb_.getProtocolVersion() == 2.0f &&
 				    strcmp(dxl_wb_.getModelName(dxl_id.second),
 					   "XL-320") ?
 				    dxl_wb_.convertValue2Load(
@@ -588,15 +582,19 @@ DynamixelController::readDynamixelStatesCallback()
 				    dxl_wb_.convertValue2Current(
 					int16_t(dxl_state->present_current)));
 
-	joint_state.name.push_back(dxl_id.first);
-	joint_state.position.push_back(position);
-	joint_state.velocity.push_back(velocity);
-	joint_state.effort.push_back(effort);
+	    joint_state->name.push_back(dxl_id.first);
+	    joint_state->position.push_back(position);
+	    joint_state->velocity.push_back(velocity);
+	    joint_state->effort.push_back(effort);
 
-	++dxl_state;
+	    ++dxl_state;
+	}
+
+	joint_state_pub_->publish(std::move(joint_state));
     }
 
-    joint_state_pub_->publish(joint_state);
+  // Publish Dynamixels' states.
+    dxl_states_pub_->publish(std::move(dxl_states));
 }
 
 /*!
