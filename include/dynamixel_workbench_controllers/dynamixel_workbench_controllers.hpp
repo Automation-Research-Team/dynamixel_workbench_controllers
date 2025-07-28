@@ -111,6 +111,7 @@ class DynamixelController : public rclcpp::Node
     const ControlItem*				dxl_present_position_;
     const ControlItem*				dxl_present_velocity_;
     const ControlItem*				dxl_present_current_;
+    std::mutex					dxl_mtx_;
 
   // Differential wheel drive stuffs conmmanded by twist tocpic
     double					wheel_separation_;

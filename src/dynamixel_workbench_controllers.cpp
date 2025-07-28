@@ -31,6 +31,7 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
      dxl_present_position_(nullptr),
      dxl_present_velocity_(nullptr),
      dxl_present_current_(nullptr),
+     dxl_mtx_(),
 
      wheel_separation_(ddynamic_reconfigure2::
 		       declare_read_only_parameter<double>(
@@ -44,6 +45,7 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 		     this, "use_moveit", false)),
      trajectory_(),
      current_point_(trajectory_.points.end()),
+     current_point_mtx_(),
 
      dxl_command_callback_group_(
 	 create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
@@ -119,7 +121,8 @@ void
 DynamixelController::initWorkbench(const std::string& port_name,
 				   const uint32_t baud_rate)
 {
-    if (const char* log; !dxl_wb_.init(port_name.c_str(), baud_rate, &log))
+    if (const char* log = nullptr;
+	!dxl_wb_.init(port_name.c_str(), baud_rate, &log))
 	throw std::runtime_error(log);
 }
 
@@ -154,7 +157,8 @@ DynamixelController::initDynamixels(const std::string& yaml_file)
     for (const auto& dxl_id : dxl_ids_)
     {
 	uint16_t	model_number = 0;
-	if (const char*	log; !dxl_wb_.ping(dxl_id.second, &model_number, &log))
+	if (const char*	log = nullptr;
+	    !dxl_wb_.ping(dxl_id.second, &model_number, &log))
 	    throw std::runtime_error(std::string(log) +
 				     ": Can't find Dynamixel ID " +
 				     std::to_string(int(dxl_id.second)));
@@ -172,7 +176,7 @@ DynamixelController::initDynamixels(const std::string& yaml_file)
 
 	for (const auto& item : items)
 	{
-	    if (const char* log;
+	    if (const char* log = nullptr;
 		dxl_id.first == item.dxl_name	&&
 		item.name != "ID"		&&
 		item.name != "Baud_Rate"	&&
@@ -280,7 +284,9 @@ DynamixelController::dynamixelCommandCallback(
 		       << "] to item[" << req->addr_name
 		       << "] of Dynamixel[" << int(req->id) << ']');
 
-    if (const char* log;
+    const std::lock_guard<std::mutex>	lock(dxl_mtx_);
+
+    if (const char* log = nullptr;
 	!(res->comm_result = dxl_wb_.itemWrite(req->id, req->addr_name.c_str(),
 					       req->value, &log)))
     {
@@ -376,7 +382,9 @@ DynamixelController::twistCallback(const twist_p& twist)
 					 * velocity_constant_value);
     }
 
-    if (const char* log;
+    const std::lock_guard<std::mutex>	lock(dxl_mtx_);
+
+    if (const char* log = nullptr;
 	!dxl_wb_.syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_VELOCITY,
 			    id_array.data(), id_array.size(),
 			    dynamixel_velocity.data(), 1, &log))
@@ -498,7 +506,9 @@ DynamixelController::readDynamixelStatesCallback()
 	std::vector<int32_t>	velocities(id_array.size());
 	std::vector<int32_t>	positions(id_array.size());
 
-	if (const char* log;
+	const std::lock_guard<std::mutex>	lock(dxl_mtx_);
+
+	if (const char* log = nullptr;
 	    !dxl_wb_.syncRead(
 		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
 		id_array.data(), id_array.size(), &log)			||
@@ -548,9 +558,11 @@ DynamixelController::readDynamixelStatesCallback()
 
 	dxl_states->dynamixel_state.clear();
 
+	const std::lock_guard<std::mutex>	lock(dxl_mtx_);
+
 	for (const auto& dxl_id : dxl_ids_)
 	{
-	    if (const char* log;
+	    if (const char* log = nullptr;
 		!dxl_wb_.readRegister(dxl_id.second,
 				      dxl_present_position_->address,
 				      length_of_data, all_data.data(), &log))
@@ -631,7 +643,9 @@ DynamixelController::writeTrajectoryPointCallback()
 	positions.push_back(dxl_wb_.convertRadian2Value(
 				id_array[i], current_point_->positions.at(i)));
 
-    if (const char* log;
+    const std::lock_guard<std::mutex>	dxl_lock(dxl_mtx_);
+
+    if (const char* log = nullptr;
 	!dxl_wb_.syncWrite(SYNC_WRITE_HANDLER_FOR_GOAL_POSITION,
 			   id_array.data(), id_array.size(),
 			   positions.data(), 1, &log))
@@ -652,8 +666,10 @@ DynamixelController::getWayPoints(const std::vector<std::string>& joint_names)
     std::vector<WayPoint>	way_points;
     if (dxl_wb_.getProtocolVersion() == 2.0f)
     {
+	const std::lock_guard<std::mutex>	lock(dxl_mtx_);
+
 	std::vector<int32_t>	positions(id_array.size());
-	if (const char* log;
+	if (const char* log = nullptr;
 	    !dxl_wb_.syncRead(
 		SYNC_READ_HANDLER_FOR_PRESENT_POSITION_VELOCITY_CURRENT,
 		id_array.data(), id_array.size(), &log)			||
@@ -679,11 +695,13 @@ DynamixelController::getWayPoints(const std::vector<std::string>& joint_names)
     }
     else if (dxl_wb_.getProtocolVersion() == 1.0f)
     {
+	const std::lock_guard<std::mutex>	lock(dxl_mtx_);
+
 	for (const auto id : id_array)
 	{
 	    uint32_t position;
 
-	    if (const char* log;
+	    if (const char* log = nullptr;
 		!dxl_wb_.readRegister(id,
 				      dxl_present_position_->address,
 				      dxl_present_position_->data_length,
