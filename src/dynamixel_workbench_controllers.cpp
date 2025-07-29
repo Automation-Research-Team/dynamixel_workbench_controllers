@@ -31,6 +31,7 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
      dxl_present_position_(nullptr),
      dxl_present_velocity_(nullptr),
      dxl_present_current_(nullptr),
+     dxl_protocol_version_(2.0f),
      dxl_mtx_(),
 
      wheel_separation_(ddynamic_reconfigure2::
@@ -253,19 +254,21 @@ DynamixelController::initControlItems()
 	    throw std::runtime_error("Failed to get Present_Current");
     }
 
-    if (dxl_wb_.getProtocolVersion() == 2.0f)
+    dxl_protocol_version_ = dxl_wb_.getProtocolVersion();
+    
+    if (dxl_protocol_version_ == 2.0f)
     {
-	uint16_t start_address = std::min(dxl_present_position_->address,
-					  dxl_present_current_->address);
+	const uint16_t start_address = std::min(dxl_present_position_->address,
+						dxl_present_current_->address);
 
       /*
 	As some models have an empty space between Present_Velocity and Present Current, read_length is modified as below.
       */
       // uint16_t read_length = control_items_["Present_Position"]->data_length + control_items_["Present_Velocity"]->data_length + control_items_["Present_Current"]->data_length;
-	uint16_t read_length = dxl_present_position_->data_length
-			     + dxl_present_velocity_->data_length
-			     + dxl_present_current_->data_length
-			     + 2;
+	const uint16_t read_length = dxl_present_position_->data_length
+				   + dxl_present_velocity_->data_length
+				   + dxl_present_current_->data_length
+				   + 2;
 
 	if (!dxl_wb_.addSyncReadHandler(start_address, read_length, &log))
 	    throw std::runtime_error(log);
@@ -280,7 +283,7 @@ DynamixelController::dynamixelCommandCallback(
     const dynamixel_command_req req, dynamixel_command_res res)
 {
     RCLCPP_INFO_STREAM(get_logger(),
-		       "Received command to set value[" << req->value
+		       "Received service request to write value[" << req->value
 		       << "] to item[" << req->addr_name
 		       << "] of Dynamixel[" << int(req->id) << ']');
 
@@ -289,16 +292,11 @@ DynamixelController::dynamixelCommandCallback(
     if (const char* log = nullptr;
 	!(res->comm_result = dxl_wb_.itemWrite(req->id, req->addr_name.c_str(),
 					       req->value, &log)))
-    {
 	RCLCPP_ERROR_STREAM(get_logger(),
 			    "Failed to write value[" << req->value
 			    << "] to item[" << req->addr_name
 			    << "] of Dynamixel[" << int(req->id)
 			    << "](" << log << ')');
-	res->comm_result = false;
-    }
-    else
-	res->comm_result = true;
 }
 
 /*!
@@ -324,14 +322,14 @@ DynamixelController::twistCallback(const twist_p& twist)
     std::vector<double>		wheel_velocity(dxl_ids_.size());
     std::vector<int32_t>	dynamixel_velocity(dxl_ids_.size());
 
-    double	velocity_constant_value = 1.0/(wheel_radius_ * rpm * 0.10472);
+    const double velocity_constant_value = 1.0/(wheel_radius_ * rpm * 0.10472);
 
     wheel_velocity[LEFT]  = twist->linear.x
 			  - (twist->angular.z * wheel_separation_ / 2);
     wheel_velocity[RIGHT] = twist->linear.x
 			  + (twist->angular.z * wheel_separation_ / 2);
 
-    if (dxl_wb_.getProtocolVersion() == 2.0f)
+    if (dxl_protocol_version_ == 2.0f)
     {
 	if (strcmp(dxl_wb_.getModelName(id_array[0]), "XL-320") == 0)
 	{
@@ -361,7 +359,7 @@ DynamixelController::twistCallback(const twist_p& twist)
 				      * velocity_constant_value;
 	}
     }
-    else if (dxl_wb_.getProtocolVersion() == 1.0f)
+    else if (dxl_protocol_version_ == 1.0f)
     {
 	if (wheel_velocity[LEFT] == 0.0)
 	    dynamixel_velocity[LEFT] = 0;
@@ -492,7 +490,7 @@ DynamixelController::readDynamixelStatesCallback()
 
   // Read Dynamixels' states and convert them to DynamixelStateList message.
     auto	dxl_states = std::make_unique<dynamixel_states_t>();
-    if (dxl_wb_.getProtocolVersion() == 2.0f)
+    if (dxl_protocol_version_ == 2.0f)
     {
 	std::vector<std::string>	name_array;
 	std::vector<uint8_t>		id_array;
@@ -548,7 +546,7 @@ DynamixelController::readDynamixelStatesCallback()
 	    dxl_states->dynamixel_state.push_back(dynamixel_state);
 	}
     }
-    else if (dxl_wb_.getProtocolVersion() == 1.0f)
+    else if (dxl_protocol_version_ == 1.0f)
     {
 	const uint16_t		length_of_data
 				    = dxl_present_position_->data_length
@@ -599,7 +597,7 @@ DynamixelController::readDynamixelStatesCallback()
 	    const auto	velocity = dxl_wb_.convertValue2Velocity(
 					dxl_id.second,
 					int32_t(dxl_state->present_velocity));
-	    const auto	effort	 = (dxl_wb_.getProtocolVersion() == 2.0f &&
+	    const auto	effort	 = (dxl_protocol_version_ == 2.0f &&
 				    strcmp(dxl_wb_.getModelName(dxl_id.second),
 					   "XL-320") ?
 				    dxl_wb_.convertValue2Load(
@@ -664,7 +662,7 @@ DynamixelController::getWayPoints(const std::vector<std::string>& joint_names)
 	id_array.push_back(dxl_ids_[joint_name]);
 
     std::vector<WayPoint>	way_points;
-    if (dxl_wb_.getProtocolVersion() == 2.0f)
+    if (dxl_protocol_version_ == 2.0f)
     {
 	const std::lock_guard<std::mutex>	lock(dxl_mtx_);
 
@@ -693,7 +691,7 @@ DynamixelController::getWayPoints(const std::vector<std::string>& joint_names)
 	    way_points.push_back(wp);
 	}
     }
-    else if (dxl_wb_.getProtocolVersion() == 1.0f)
+    else if (dxl_protocol_version_ == 1.0f)
     {
 	const std::lock_guard<std::mutex>	lock(dxl_mtx_);
 
