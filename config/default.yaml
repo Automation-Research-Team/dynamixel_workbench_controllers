@@ -6,7 +6,6 @@ dynamixel_workbench:
     dxl_write_period:       0.010
     use_joint_states_topic: false
     use_moveit:             false
-    dynamixel_info:         basic.yaml
     mobile_robot_config:
       separation_between_wheels: 0.500
       radius_of_wheel:           0.050

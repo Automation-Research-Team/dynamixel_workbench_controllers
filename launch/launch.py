@@ -2,7 +2,8 @@ from launch                  import LaunchDescription
 from launch.actions          import (DeclareLaunchArgument, OpaqueFunction,
                                      GroupAction)
 from launch.substitutions    import (LaunchConfiguration, ThisLaunchFileDir,
-                                     PathJoinSubstitution, EqualsSubstitution)
+                                     PathJoinSubstitution, EqualsSubstitution,
+                                     IfElseSubstitution)
 from launch.conditions       import IfCondition, UnlessCondition
 from launch_ros.actions      import Node, LoadComposableNodes
 from launch_ros.descriptions import ComposableNode
@@ -35,27 +36,9 @@ launch_arguments = [
      'description': 'pipe node output [screen|log|both]'}]
 
 parameter_arguments = [
-    {'name':        'usb_port',
-     'default':     '/dev/ttyUSB0',
-     'description': 'device name of USB port'},
-    {'name':        'dxl_baud_rate',
-     'default':     '57600',
-     'description': 'baud rate of USB port'},
-    {'name':        'dxl_read_period',
-     'default':     '0.010',
-     'description': 'period of reading dynamixel states and publishing it as well as joint_states'},
-    {'name':        'dxl_write_period',
-     'default':     '0.010',
-     'description': 'period of writing trajectory points one by one'},
-    {'name':        'use_joint_states_topic',
-     'default':     'false',
-     'description': 'publish joint states if true'},
-    {'name':        'use_moveit',
-     'default':     'false',
-     'description': 'do not interpolate subscribed trajectory if true'},
     {'name':        'dynamixel_info',
      'default':     '',
-     'description': 'path to YAML file for configuring each dynamixel'}]
+     'description': 'path to YAML file for configuring dynamixel motors'}]
 
 def declare_launch_arguments(args):
     return [DeclareLaunchArgument(arg['name'], default_value=arg['default'],
@@ -67,14 +50,18 @@ def set_configurable_parameters(args):
                  for arg in args])
 
 def launch_setup(context, param_args):
-    config_file = LaunchConfiguration('config_file')
-    params = config_file if config_file.perform(context) != '' else \
-             set_configurable_parameters(param_args)
+    config_file   = IfElseSubstitution(
+                        EqualsSubstitution(
+                            LaunchConfiguration('config_file'), ''),
+                        PathJoinSubstitution([ThisLaunchFileDir(), '..',
+                                              'config', 'default.yaml']),
+                        LaunchConfiguration('config_file'))
+    config_params = set_configurable_parameters(param_args)
     return [Node(namespace=LaunchConfiguration('namespace'),
                  name=LaunchConfiguration('name'),
                  package='dynamixel_workbench_controllers',
                  executable='dynamixel_workbench_controllers_node',
-                 parameters=[params],
+                 parameters=[config_file, config_params],
                  output=LaunchConfiguration('output'),
                  arguments=['--ros-args', '--log-level',
                             LaunchConfiguration('log_level')],
@@ -102,7 +89,7 @@ def launch_setup(context, param_args):
                                 name=LaunchConfiguration('name'),
                                 package='dynamixel_workbench_controllers',
                                 plugin='dynamixel_workbench_controllers::DynamixelController',
-                                parameters=[params],
+                                parameters=[config_file, config_params],
                                 extra_arguments=[
                                     {'use_intra_process_comms': True}])])])
             ]
