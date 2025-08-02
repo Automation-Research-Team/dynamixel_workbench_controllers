@@ -82,12 +82,7 @@ install(
 )
 
 install(
-  DIRECTORY launch
-  DESTINATION share/${PROJECT_NAME}/
-)
-
-install(
-  DIRECTORY config
+  DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}/
 )
 
