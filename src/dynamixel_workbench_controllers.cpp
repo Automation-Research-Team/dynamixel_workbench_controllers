@@ -34,15 +34,14 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
      dxl_protocol_version_(2.0f),
      dxl_mtx_(),
 
-     wheel_separation_(ddynamic_reconfigure2::
-		       declare_read_only_parameter<double>(
+     wheel_separation_(ddynamic_reconfigure2::declare_read_only_parameter(
 			   this,
 			   "mobile_robot_config.separation_between_wheels",
 			   0.0)),
-     wheel_radius_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
+     wheel_radius_(ddynamic_reconfigure2::declare_read_only_parameter(
 		       this, "mobile_robot_config.radius_of_wheel", 0.0)),
 
-     use_moveit_(ddynamic_reconfigure2::declare_read_only_parameter<bool>(
+     use_moveit_(ddynamic_reconfigure2::declare_read_only_parameter(
 		     this, "use_moveit", false)),
      trajectory_(),
      current_point_(trajectory_.points.end()),
@@ -69,7 +68,7 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 				   this, std::placeholders::_1))),
      dxl_states_pub_(create_publisher<dynamixel_states_t>("~/dynamixel_state",
 							  100)),
-     joint_state_pub_(ddynamic_reconfigure2::declare_read_only_parameter<bool>(
+     joint_state_pub_(ddynamic_reconfigure2::declare_read_only_parameter(
 			  this, "use_joint_states_topic", false) ?
 		      create_publisher<joint_state_t>("joint_states", 100) :
 		      nullptr),
@@ -78,14 +77,13 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 	 create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
      read_timer_(create_wall_timer(
 		     std::chrono::duration<double>(
-			 ddynamic_reconfigure2::
-			 declare_read_only_parameter<double>(
+			 ddynamic_reconfigure2::declare_read_only_parameter(
 			     this, "dxl_read_period", 0.010)),
 		     std::bind(
 			 &DynamixelController::readDynamixelStatesCallback,
 			 this),
 		     read_timer_callback_group_)),
-     write_period_(ddynamic_reconfigure2::declare_read_only_parameter<double>(
+     write_period_(ddynamic_reconfigure2::declare_read_only_parameter(
 		       this, "dxl_write_period", 0.010)),
      write_timer_callback_group_(
 	 create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
@@ -98,13 +96,11 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
 {
     try
     {
-	initWorkbench(ddynamic_reconfigure2::
-		      declare_read_only_parameter<std::string>(
+	initWorkbench(ddynamic_reconfigure2::declare_read_only_parameter(
 			  this, "usb_port", "/dev/ttyUSB0"),
-		      ddynamic_reconfigure2::declare_read_only_parameter<int>(
+		      ddynamic_reconfigure2::declare_read_only_parameter(
 			  this, "dxl_baud_rate", 1000000));
-	initDynamixels(ddynamic_reconfigure2::
-		       declare_read_only_parameter<std::string>(
+	initDynamixels(ddynamic_reconfigure2::declare_read_only_parameter(
 			   this, "dynamixel_info", ""));
 	initControlItems();
     }
@@ -255,7 +251,7 @@ DynamixelController::initControlItems()
     }
 
     dxl_protocol_version_ = dxl_wb_.getProtocolVersion();
-    
+
     if (dxl_protocol_version_ == 2.0f)
     {
 	const uint16_t start_address = std::min(dxl_present_position_->address,
