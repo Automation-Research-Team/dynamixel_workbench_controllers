@@ -11,57 +11,19 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-find_package(PkgConfig)
-pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
-
-find_package(ament_cmake REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rclcpp_components REQUIRED)
-find_package(sensor_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(trajectory_msgs REQUIRED)
-find_package(dynamixel_workbench_msgs REQUIRED)
-find_package(dynamixel_workbench_toolbox REQUIRED)
-find_package(ddynamic_reconfigure2 REQUIRED)
-
-find_package(Eigen3 REQUIRED)
+##################
+#  Dependencies  #
+##################
+find_package(ament_cmake_auto REQUIRED)
+ament_auto_find_build_dependencies()
 
 ###########
 #  Build  #
 ###########
-add_library(
+ament_auto_add_library(
   ${PROJECT_NAME} SHARED
     src/dynamixel_workbench_controllers.cpp
     src/trajectory_generator.cpp
-)
-
-target_include_directories(
-  ${PROJECT_NAME} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-
-target_compile_definitions(
-  ${PROJECT_NAME} PRIVATE
-    COMPOSITION_BUILDING_DLL
-)
-
-ament_target_dependencies(
-  ${PROJECT_NAME}
-    rclcpp
-    rclcpp_components
-    sensor_msgs
-    geometry_msgs
-    trajectory_msgs
-    dynamixel_workbench_msgs
-    dynamixel_workbench_toolbox
-    ddynamic_reconfigure2
-)
-
-target_link_libraries(
-  ${PROJECT_NAME}
-    ${Eigen3_LIBRARIES}
-    ${YAML_CPP_LIBRARIES}
 )
 
 rclcpp_components_register_node(
@@ -74,7 +36,7 @@ rclcpp_components_register_node(
 #  Install  #
 #############
 install(
-  TARGETS  ${PROJECT_NAME} #find_dynamixel
+  TARGETS  ${PROJECT_NAME}
   EXPORT   export_${PROJECT_NAME}
   LIBRARY  DESTINATION lib
   ARCHIVE  DESTINATION lib
@@ -82,14 +44,9 @@ install(
 )
 
 install(
-  DIRECTORY launch config
+  DIRECTORY   launch config
   DESTINATION share/${PROJECT_NAME}/
 )
-
-#############
-#  Exports  #
-#############
-ament_export_libraries(${PROJECT_NAME})
 
 ##########
 #  test  #
@@ -108,4 +65,4 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-ament_package()
+ament_auto_package()
