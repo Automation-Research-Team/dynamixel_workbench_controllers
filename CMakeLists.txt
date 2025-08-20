@@ -17,6 +17,9 @@ endif()
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
+find_package(PkgConfig)
+pkg_check_modules(YAML-CPP REQUIRED yaml-cpp)
+
 ###########
 #  Build  #
 ###########
@@ -24,6 +27,11 @@ ament_auto_add_library(
   ${PROJECT_NAME} SHARED
     src/dynamixel_workbench_controllers.cpp
     src/trajectory_generator.cpp
+)
+
+ament_target_dependencies(
+  ${PROJECT_NAME}
+    YAML-CPP
 )
 
 rclcpp_components_register_node(
