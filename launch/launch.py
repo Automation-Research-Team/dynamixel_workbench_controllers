@@ -12,7 +12,7 @@ from launch_ros.descriptions  import ComposableNode
 launch_arguments = [
     {
         'name':        'name',
-        'default':     'dynamixel_workbench',
+        'default':     'basic_driver',
         'description': 'name of the controller'
     },
     {
@@ -47,16 +47,6 @@ launch_arguments = [
     }
 ]
 
-parameter_arguments = [
-    {
-        'name':        'dynamixel_info',
-        'default':     PathJoinSubstitution([
-                           FindPackageShare('dynamixel_workbench_controllers'),
-                           'config', 'basic.yaml']),
-        'description': 'path to YAML file for configuring dynamixel motors'
-    }
-]
-
 def declare_launch_arguments(args):
     return [DeclareLaunchArgument(arg['name'],
                                   default_value=arg.get('default'),
@@ -64,17 +54,12 @@ def declare_launch_arguments(args):
                                   choices=arg.get('choices')) \
             for arg in args]
 
-def set_configurable_parameters(args):
-    return {arg['name']: LaunchConfiguration(arg['name']) for arg in args}
-
 def launch_setup(context, param_args):
-    config_file   = LaunchConfiguration('config_file')
-    config_params = set_configurable_parameters(param_args)
     return [
         Node(name=LaunchConfiguration('name'),
              package='dynamixel_workbench_controllers',
              executable='dynamixel_workbench_controllers_node',
-             parameters=[config_file, config_params],
+             parameters=[LaunchConfiguration('config_file')],
              output=LaunchConfiguration('output'),
              arguments=['--ros-args', '--log-level',
                         LaunchConfiguration('log_level')],
@@ -100,13 +85,11 @@ def launch_setup(context, param_args):
                             name=LaunchConfiguration('name'),
                             package='dynamixel_workbench_controllers',
                             plugin='dynamixel_workbench_controllers::DynamixelController',
-                            parameters=[config_file, config_params],
+                            parameters=[LaunchConfiguration('config_file')],
                             extra_arguments=[
                                 {'use_intra_process_comms': True}])])])
     ]
 
 def generate_launch_description():
-    return LaunchDescription(declare_launch_arguments(launch_arguments +
-                                                      parameter_arguments) + \
-                             [OpaqueFunction(function=launch_setup,
-                                             args=[parameter_arguments])])
+    return LaunchDescription(declare_launch_arguments(launch_arguments) + \
+                             [OpaqueFunction(function=launch_setup)])

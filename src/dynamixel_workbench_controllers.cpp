@@ -18,7 +18,9 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <filesystem>
 #include <yaml-cpp/yaml.h>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <geometry_msgs/msg/twist.hpp>
@@ -44,6 +46,39 @@
 
 namespace dynamixel_workbench_controllers
 {
+/************************************************************************
+*  static functions							*
+************************************************************************/
+static std::string
+filepath_from_url(const std::string& url)
+{
+  // Split the input URL into tokens by the dellimiter '/'.
+    std::vector<std::string>	tokens;
+    size_t			pos = 0;
+    for (size_t epos;
+	 (epos = url.find_first_of('/', pos)) != std::string::npos;
+	 pos = epos + 1)
+	tokens.push_back(url.substr(pos, epos - pos));
+    if (pos < url.size())
+	tokens.push_back(url.substr(pos));
+
+    if (tokens.size() < 3 || tokens[1] != "")
+	throw std::runtime_error("illegal URL: " + url);
+
+    std::filesystem::path	path;
+    if (tokens[0] == "package:")
+        path = ament_index_cpp::get_package_share_directory(tokens[2]);
+    else if (tokens[0] == "file:")
+        path = "/";
+    else
+        throw std::runtime_error("unknown URL scheme: " + tokens[0]);
+
+    for (size_t n = 3; n < tokens.size(); ++n)
+	path /= tokens[n];
+
+    return path.string<char>();
+}
+
 /************************************************************************
 *  class DynamixelController						*
 ************************************************************************/
@@ -90,7 +125,7 @@ class DynamixelController : public rclcpp::Node
   private:
     void	initWorkbench(const std::string& port_name,
 			      const uint32_t baud_rate)			;
-    void	initDynamixels(const std::string& yaml_file)		;
+    void	initDynamixels(const std::string& yaml_url)		;
     void	initControlItems()					;
 
     void	dynamixelCommandCallback(const dynamixel_command_req req,
@@ -238,11 +273,11 @@ DynamixelController::initWorkbench(const std::string& port_name,
 }
 
 void
-DynamixelController::initDynamixels(const std::string& yaml_file)
+DynamixelController::initDynamixels(const std::string& yaml_url)
 {
   // Get Dynamixel IDs and list up setting items for each Dynamixel.
     std::vector<Item>	items;
-    YAML::Node		dynamixel = YAML::LoadFile(yaml_file);
+    YAML::Node		dynamixel = YAML::LoadFile(filepath_from_url(yaml_url));
 
     for (auto it_file = dynamixel.begin(); it_file != dynamixel.end();
 	 ++it_file)
