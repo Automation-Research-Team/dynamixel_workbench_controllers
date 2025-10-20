@@ -14,7 +14,7 @@
 * limitations under the License.
 *******************************************************************************/
 
-/* Authors: Taehun Lim (Darby) */
+/* Authors: Taehun Lim (Darby), Toshio Ueshiba (AIST) */
 
 #include <rclcpp/rclcpp.hpp>
 
