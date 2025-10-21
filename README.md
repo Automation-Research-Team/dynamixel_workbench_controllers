@@ -20,14 +20,14 @@ $ sudo apt install ros-jazzy-dynamixel-workbench-toolbox ros-jazzy-dynamixel-wor
 ```
 そして，`github`から`dynamixel_workbench_controllers`を入手し，`devel-aist`ブランチを取り出します．
 ```bash
-$ cd catkin_ws/src
+$ cd ros2_ws/src
 $ git clone git@github.com:Automation-Research-Team/dynamixel_workbench_controllers.git
 $ cd dynamixel_workbench_controllers
 $ git checkout devel-aist
 ```
 最後に，ワークスペース全体をコンパイルしてください．
 ```bash
-$ cd catkin_ws
+$ cd ros2_ws
 $ colcon build
 ```
 
