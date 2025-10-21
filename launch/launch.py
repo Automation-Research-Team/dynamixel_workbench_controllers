@@ -1,9 +1,8 @@
 from launch                   import LaunchDescription
-from launch.actions           import (DeclareLaunchArgument, OpaqueFunction,
-                                      GroupAction)
+from launch.actions           import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions     import (LaunchConfiguration,
-                                      PathJoinSubstitution, EqualsSubstitution)
-from launch.conditions        import IfCondition, UnlessCondition
+                                      PathJoinSubstitution)
+from launch.conditions        import UnlessCondition
 from launch_ros.actions       import Node, LoadComposableNodes
 from launch_ros.substitutions import FindPackageShare
 from launch_ros.descriptions  import ComposableNode
@@ -30,7 +29,7 @@ launch_arguments = [
     },
     {
         'name':        'container',
-        'default':     '',
+        'default':     'dynamixel_workbench_container',
         'description': 'name of internal or external component container'
     },
     {
@@ -54,40 +53,25 @@ def declare_launch_arguments(args):
                                   choices=arg.get('choices')) \
             for arg in args]
 
-def launch_setup(context, param_args):
+def launch_setup(context):
     return [
-        Node(name=LaunchConfiguration('name'),
-             package='dynamixel_workbench_controllers',
-             executable='dynamixel_workbench_controllers_node',
-             parameters=[LaunchConfiguration('config_file')],
+        Node(name=LaunchConfiguration('container'),
+             package='rclcpp_components',
+             executable='component_container_mt',
              output=LaunchConfiguration('output'),
              arguments=['--ros-args', '--log-level',
                         LaunchConfiguration('log_level')],
-             emulate_tty=True,
-             condition=IfCondition(
-                 EqualsSubstitution(LaunchConfiguration('container'), ''))),
-        GroupAction(
-            condition=UnlessCondition(
-                EqualsSubstitution(LaunchConfiguration('container'), '')),
-            actions=[
-                Node(name=LaunchConfiguration('container'),
-                     package='rclcpp_components',
-                     executable='component_container_mt',
-                     output=LaunchConfiguration('output'),
-                     arguments=['--ros-args', '--log-level',
-                                LaunchConfiguration('log_level')],
-                     condition=UnlessCondition(
-                         LaunchConfiguration('external_container'))),
-                LoadComposableNodes(
-                    target_container=LaunchConfiguration('container'),
-                    composable_node_descriptions=[
-                        ComposableNode(
-                            name=LaunchConfiguration('name'),
-                            package='dynamixel_workbench_controllers',
-                            plugin='dynamixel_workbench_controllers::DynamixelController',
-                            parameters=[LaunchConfiguration('config_file')],
-                            extra_arguments=[
-                                {'use_intra_process_comms': True}])])])
+             condition=UnlessCondition(
+                 LaunchConfiguration('external_container'))),
+        LoadComposableNodes(
+            target_container=LaunchConfiguration('container'),
+            composable_node_descriptions=[
+                ComposableNode(
+                    name=LaunchConfiguration('name'),
+                    package='dynamixel_workbench_controllers',
+                    plugin='dynamixel_workbench_controllers::DynamixelController',
+                    parameters=[LaunchConfiguration('config_file')],
+                    extra_arguments=[{'use_intra_process_comms': True}])])
     ]
 
 def generate_launch_description():
