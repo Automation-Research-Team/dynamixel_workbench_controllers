@@ -21,7 +21,7 @@ $ sudo apt install ros-jazzy-dynamixel-workbench-toolbox ros-jazzy-dynamixel-wor
 そして，`github`から`dynamixel_workbench_controllers`を入手し，`devel-aist`ブランチを取り出します．
 ```bash
 $ cd ros2_ws/src
-$ git clone git@github.com:Automation-Research-Team/dynamixel_workbench_controllers.git
+$ git clone https://github.com/Automation-Research-Team/dynamixel_workbench_controllers
 $ cd dynamixel_workbench_controllers
 $ git checkout devel-aist
 ```
@@ -34,14 +34,16 @@ $ colcon build
 ## dynamixel_workbench_controllersノード
 ### ノードの機能
 `dynamixel_workbench_controllers`ノードは，USB=シリアル変換インタフェース[U2D2](https://emanual.robotis.com/docs/en/parts/interface/u2d2/)のコントローラであり，それに接続されている1台以上の`Dynamixel`サーボモーターを制御します．主に，次の3つの機能があります．
-- **~/dynamixel_command** サービス（[dynamixel_workbench_msgs/srv/DynamixelCommand](http://docs.ros.org/en/noetic/api/dynamixel_workbench_msgs/html/srv/DynamixelCommand.html)型）を介してクライアントからのリクエストを受信し，制御命令を指定されたモーターに伝えてハードウェアを動かす
-- **~/joint_trajectory** トピック（[trajectory_msgs/msg/JointTrajectory](http://docs.ros.org/en/jazzy/p/trajectory_msgs/msg/JointTrajectory.html)型）から関節角空間における軌道を受信し，それをモーターに転送してハードウェアを動かす．多関節アームやパン=チルト雲台の制御を想定
-- **~/cmd_vel** トピック（[geometry_msgs/msg/Twist](https://docs.ros2.org/latest/api/geometry_msgs/msg/Twist.html)型）から2次元平面上の直交座標空間における並進・回転速度を受信し，それを左右の車輪の回転速度に変換しモーターに転送してハードウェアを動かす．差動二輪型移動台車の制御を想定
+- **~/dynamixel_command** サービス（[dynamixel_workbench_msgs/DynamixelCommand](http://docs.ros.org/en/noetic/api/dynamixel_workbench_msgs/html/srv/DynamixelCommand.html)型）を介してクライアントからのリクエストを受信し，制御命令を指定されたモーターに伝えてハードウェアを動かす
+- **~/joint_trajectory** トピック（[trajectory_msgs/JointTrajectory](http://docs.ros.org/en/jazzy/p/trajectory_msgs/msg/JointTrajectory.html)型）から関節角空間における軌道を受信し，それをモーターに転送してハードウェアを動かす．多関節アームやパン=チルト雲台の制御を想定
+- **~/cmd_vel** トピック（[geometry_msgs/Twist](https://docs.ros2.org/latest/api/geometry_msgs/msg/Twist.html)型）から2次元平面上の直交座標空間における並進・回転速度を受信し，それを左右の車輪の回転速度に変換しモーターに転送してハードウェアを動かす．差動二輪型移動台車の制御を想定
 
-また，サービス，トピック，パラメータ等の名前は，[オリジナルのdynamixel_workbench_controllers](https://wiki.ros.org/dynamixel_workbench_controllers)のそれに一致させています．
+また，サービス，トピック，パラメータ等の名前は，[オリジナルのdynamixel_workbench_controllers](https://github.com/ROBOTIS-GIT/dynamixel-workbench/tree/noetic-devel)のそれに一致させています．
+
+なお，ROS1の公式サイトにも[dynamixel_workbench_controllersに関する記述](https://wiki.ros.org/dynamixel_workbench_controllers)がありますが，この情報は古く，上記オリジナルバージョンにも整合していないので，本パッケージとは無関係です．
 
 ### ROSサービス
-- **~/dynamixel_command**（[dynamixel_workbench_msgs/srv/DynamixelCommand](http://docs.ros.org/en/noetic/api/dynamixel_workbench_msgs/html/srv/DynamixelCommand.html)型）：制御コマンドを指定されたIDを持つモーターに送る
+- **~/dynamixel_command**（[dynamixel_workbench_msgs/DynamixelCommand](http://docs.ros.org/en/noetic/api/dynamixel_workbench_msgs/html/srv/DynamixelCommand.html)型）：制御コマンドを指定されたIDを持つモーターに送る
 
 コマンドのリクエストは，次の4フィールドから成ります．
 - **command** (type: string): 通常使われないので，空文字列でOK
@@ -50,10 +52,10 @@ $ colcon build
 - **value** (type: int32): コマンドで与える指令値
 
 ### ROSトピック
-- **~/joint_trajectory**（[trajectory_msgs/msg/JointTrajectory](http://docs.ros.org/en/jazzy/p/trajectory_msgs/msg/JointTrajectory.html)型）：MoveIt等によって生成された関節角空間における軌道をsubscribe
-- **~/cmd_vel**（[geometry_msgs/msg/Twist](https://docs.ros2.org/latest/api/geometry_msgs/msg/Twist.html)型）：JoyStick等によって生成された2次元直交座標空間における並進・回転速度をsubscribe
-- **~/dynamixel_state**（[dynamixel_msgs/msg/DynamixelStateList](http://docs.ros.org/en/noetic/api/dynamixel_workbench_msgs/html/msg/DynamixelStateList.html)型）：`U2D2`に接続されている全てのモーターの状態をpublish
-- **joint_states**（[sensor_msgs/msg/JointState](https://docs.ros2.org/latest/api/sensor_msgs/msg/JointState.html)型）：`U2D2`に接続されている全てのモーターの回転角，回転速度およびトルクをpublish
+- **~/joint_trajectory**（[trajectory_msgs/JointTrajectory](http://docs.ros.org/en/jazzy/p/trajectory_msgs/msg/JointTrajectory.html)型）：MoveIt等によって生成された関節角空間における軌道をsubscribe
+- **~/cmd_vel**（[geometry_msgs/Twist](https://docs.ros2.org/latest/api/geometry_msgs/msg/Twist.html)型）：JoyStick等によって生成された2次元直交座標空間における並進・回転速度をsubscribe
+- **~/dynamixel_state**（[dynamixel_msgs/DynamixelStateList](http://docs.ros.org/en/noetic/api/dynamixel_workbench_msgs/html/msg/DynamixelStateList.html)型）：`U2D2`に接続されている全てのモーターの状態をpublish
+- **joint_states**（[sensor_msgs/JointState](https://docs.ros2.org/latest/api/sensor_msgs/msg/JointState.html)型）：`U2D2`に接続されている全てのモーターの回転角，回転速度およびトルクをpublish
 
 ### ノードパラメータ
 - **usb_port** (type: string): `U2D2`を接続するPCのUSBポート名 (default: `/dev/ttyUSB0`)
@@ -68,7 +70,7 @@ $ colcon build
 
 ## ノードの起動
 ### 注意
-本ノードは[rclcppのコンポーネント](https://index.ros.org/p/rclcpp_components/)として実装されており，コンポーネントコンテナにロードして使用します．このとき，[launchファイル](./launch/launch.py)にあるように，必ずマルチスレッド対応のコンテナ(`component_container_mt`)にロードしてください．複数のコールバックグループを使用し，マルチスレッドで実行することを前提にしていますので，シングルスレッドコンテナ(`component_container`)にロードするとデッドロックに陥ってハングします．
+本ノードは[rclcppのコンポーネント](https://docs.ros.org/en/jazzy/Tutorials/Intermediate/Writing-a-Composable-Node.html)として実装されており，コンポーネントコンテナにロードして使用します．このとき，[launchファイル](./launch/launch.py#L60)にあるように，必ずマルチスレッド対応のコンテナ(`component_container_mt`)にロードしてください．複数のコールバックグループを使用し，マルチスレッドで実行することを前提にしていますので，シングルスレッドコンテナ(`component_container`)にロードするとデッドロックに陥ってハングします．
 
 ### 設定ファイルの準備
 次の2つの設定ファイルが必要です．
