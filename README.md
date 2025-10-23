@@ -2,7 +2,7 @@ dynamixel_workbench_controllers
 ==================================================
 
 ## 概要
-本パッケージは，[Dynamixelサーボモーター](https://www.dynamixel.com/index.php)をROSから駆動するためのコントローラであるオリジナルの[dynamixel_workbench_controllers](https://wiki.ros.org/dynamixel_workbench_controllers)を，ROS2に対応するよう修正したものです．
+本パッケージは，[Dynamixelサーボモーター](https://www.dynamixel.com/index.php)をROSから駆動するためのコントローラであるオリジナルの[dynamixel_workbench_controllers](https://github.com/ROBOTIS-GIT/dynamixel-workbench/tree/noetic-devel/dynamixel_workbench_controllers)を，ROS2に対応するよう修正したものです．
 
 ## 背景
 ROS1では，ROBOTIS社から[dynamixel_workbench](https://github.com/ROBOTIS-GIT/dynamixel-workbench/tree/noetic-devel)パッケージが提供されており，この中に`dynamixel_workbench_controllers`が含まれていました．これは，[dynamixel_workbench_msgs](https://github.com/ROBOTIS-GIT/dynamixel-workbench-msgs)に定義されたサービスやメッセージを介して，ROSから`Dynamixelサーボモーター`を制御するためのものです．
@@ -38,7 +38,7 @@ $ colcon build
 - **~/joint_trajectory** トピック（[trajectory_msgs/JointTrajectory](http://docs.ros.org/en/jazzy/p/trajectory_msgs/msg/JointTrajectory.html)型）から関節角空間における軌道を受信し，それをモーターに転送してハードウェアを動かす．多関節アームやパン=チルト雲台の制御を想定
 - **~/cmd_vel** トピック（[geometry_msgs/Twist](https://docs.ros2.org/latest/api/geometry_msgs/msg/Twist.html)型）から2次元平面上の直交座標空間における並進・回転速度を受信し，それを左右の車輪の回転速度に変換しモーターに転送してハードウェアを動かす．差動二輪型移動台車の制御を想定
 
-また，サービス，トピック，パラメータ等の名前は，[オリジナルのdynamixel_workbench_controllers](https://github.com/ROBOTIS-GIT/dynamixel-workbench/tree/noetic-devel)のそれに一致させています．
+また，サービス，トピック，パラメータ等の名前は，[オリジナルのdynamixel_workbench_controllers](https://github.com/ROBOTIS-GIT/dynamixel-workbench/tree/noetic-devel/dynamixel_workbench_controllers)のそれに一致させています．
 
 なお，ROS1の公式サイトにも[dynamixel_workbench_controllersに関する記述](https://wiki.ros.org/dynamixel_workbench_controllers)がありますが，この情報は古く，上記オリジナルバージョンにも整合していないので，本パッケージとは無関係です．
 
@@ -87,3 +87,6 @@ $ ros2 launch dynamixel_workbench_controllers launch.py [name:=<node_name>] [con
 - **config_file**: ノードパラメータ設定ファイルへのパス (default: [default.yaml](./config/default.yaml))
 - **container**: ノードのロード先となるコンポーネントコンテナの名前 (default: `dynamixel_workbench_container`)
 - **external_container**: `true`ならば，`container`に指定した名前で別途起動していた既存のコンテナにロード．`false`ならば，`container`に指定した名前で新たにコンテナを起動し，それにロード (default: `false`)
+
+## dynamixel_workbench_controllersの使用例
+本ノードが提供するサービス `~/dynamixel_command` を利用して，Dynamixelモーターによって駆動される2指グリッパを制御するコントローラ [precision_tool_controller](https://github.com/Automation-Research-Team/artros/blob/ros2-devel/aist_fastening_tools/src/precision_tool_controller.cpp) がありますので．ご参照ください．
