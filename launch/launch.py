@@ -15,7 +15,7 @@ launch_arguments = [
         'description': 'name of the controller'
     },
     {
-        'name':        'config_file',
+        'name':        'param_file',
         'default':     PathJoinSubstitution([
                            FindPackageShare('dynamixel_workbench_controllers'),
                            'config', 'default.yaml']),
@@ -70,7 +70,7 @@ def launch_setup(context):
                     name=LaunchConfiguration('name'),
                     package='dynamixel_workbench_controllers',
                     plugin='dynamixel_workbench_controllers::DynamixelController',
-                    parameters=[LaunchConfiguration('config_file')],
+                    parameters=[LaunchConfiguration('param_file')],
                     extra_arguments=[{'use_intra_process_comms': True}])])
     ]
 

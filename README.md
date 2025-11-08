@@ -65,7 +65,7 @@ $ colcon build
 - **use_joint_states_topic** (type: bool): `true`ならば`joint_states`トピックをpublishする (default: `false`)
 - **use_moveit** (type: bool): `true`ならば`~/joint_trajectory`トピックでsubscribeした関節角軌道上の通過点(waypoint)をそのままモータに送る．waypointは`dxl_write_period`で指定された間隔で次々に送られるので，waypointが疎な場合，モーターは非常に高速に動くことになる．これに対し，`false`ならば，subscribeされた軌道のwaypoint間をさらに補間した上でモーターに送る (default: `false`)
 - **mobile_robot_config.separation_between_wheels** (type: float): 差動二輪型移動台車の車輪間隔．この値が0以下ならば`~/cmd_vel`トピックはsubscribeされない (default: `0.0` meters)
-- **mobile_robot_config.adius_of_wheel** (type: float): 差動二輪型移動台車の車輪半径．この値が0以下ならば`~/cmd_vel`トピックはsubscribeされない (default: `0.0` meters)
+- **mobile_robot_config.radius_of_wheel** (type: float): 差動二輪型移動台車の車輪半径．この値が0以下ならば`~/cmd_vel`トピックはsubscribeされない (default: `0.0` meters)
 - **dynamixel_info** (type: string): `U2D2`に接続される全`Dynamixel`サーボモーターの設定（モーターのID等）を記述するYAMLファイルへのパス．`file:///xxx/yyy/zzz.yaml`もしくは`package://package_name/xxx/yyyy/zzz.yaml`のいずれかの形式で指定する．前者は絶対パスで指定し，後者はROS2パッケージ下のファイルを参照する．省略不可
 
 ## ノードの起動
@@ -81,10 +81,10 @@ $ colcon build
 ### 起動方法
 次のコマンドを投入して起動します．
 ```bash
-$ ros2 launch dynamixel_workbench_controllers launch.py [name:=<node_name>] [config_file:=<config_file>] [container:=<container_name>] [external_container:=true]
+$ ros2 launch dynamixel_workbench_controllers launch.py [name:=<node_name>] [param_file:=<param_file>] [container:=<container_name>] [external_container:=true]
 ```
 - **name**: ノードに与える名前 (default: `basic_driver`)
-- **config_file**: ノードパラメータ設定ファイルへのパス (default: [default.yaml](./config/default.yaml))
+- **param_file**: ノードパラメータ設定ファイルへのパス (default: [default.yaml](./config/default.yaml))
 - **container**: ノードのロード先となるコンポーネントコンテナの名前 (default: `dynamixel_workbench_container`)
 - **external_container**: `true`ならば，`container`に指定した名前で別途起動していた既存のコンテナにロード．`false`ならば，`container`に指定した名前で新たにコンテナを起動し，それにロード (default: `false`)
 
