@@ -91,26 +91,27 @@ class DynamixelController : public rclcpp::Node
 					DynamixelStateList;
     using dynamixel_command_t	= dynamixel_workbench_msgs::srv::
 					DynamixelCommand;
-    using dynamixel_command_req	= dynamixel_command_t::Request::SharedPtr;
-    using dynamixel_command_res	= dynamixel_command_t::Response::SharedPtr;
-
     using twist_t		= geometry_msgs::msg::Twist;
-    using twist_p		= twist_t::UniquePtr;
     using trajectory_t		= trajectory_msgs::msg::JointTrajectory;
-    using trajectory_p		= trajectory_t::UniquePtr;
     using trajectory_point_t	= trajectory_msgs::msg::JointTrajectoryPoint;
     using trajectory_point_iter	= std::vector<trajectory_point_t>::
 					const_iterator;
     using joint_state_t		= sensor_msgs::msg::JointState;
-
     using callback_group_p	= rclcpp::CallbackGroup::SharedPtr;
-    template <class MSG>
-    using publisher_p		= typename rclcpp::Publisher<MSG>::SharedPtr;
-    template <class MSG>
-    using subscription_p	= typename rclcpp::Subscription<MSG>::SharedPtr;
-    template <class SRV>
-    using service_p		= typename rclcpp::Service<SRV>::SharedPtr;
     using timer_p		= rclcpp::TimerBase::SharedPtr;
+
+    template <class MSG>
+    using pub_p			= typename rclcpp::Publisher<MSG>::SharedPtr;
+    template <class MSG>
+    using sub_p			= typename rclcpp::Subscription<MSG>::SharedPtr;
+    template <class MSG>
+    using msg_cp		= typename MSG::ConstSharedPtr;
+    template <class SRV>
+    using srv_p			= typename rclcpp::Service<SRV>::SharedPtr;
+    template <class SRV>
+    using req_p			= typename SRV::Request::SharedPtr;
+    template <class SRV>
+    using res_p			= typename SRV::Response::SharedPtr;
 
     struct Item
     {
@@ -128,10 +129,10 @@ class DynamixelController : public rclcpp::Node
     void	initDynamixels(const std::string& yaml_url)		;
     void	initControlItems()					;
 
-    void	dynamixelCommandCallback(const dynamixel_command_req req,
-					 dynamixel_command_res res)	;
-    void	twistCallback(const twist_p& twist)			;
-    void	trajectoryCallback(const trajectory_p& trajectory)	;
+    void	dynamixelCommandCallback(req_p<dynamixel_command_t> req,
+					 res_p<dynamixel_command_t> res);
+    void	twistCallback(const msg_cp<twist_t>& twist)		;
+    void	trajectoryCallback(const msg_cp<trajectory_t>& trajectory);
 
     void	readDynamixelStatesCallback()				;
     void	writeTrajectoryPointCallback()				;
@@ -141,36 +142,36 @@ class DynamixelController : public rclcpp::Node
 
   private:
   // Dynamixel Workbench
-    DynamixelWorkbench				dxl_wb_;
-    std::map<std::string, uint8_t>		dxl_ids_;
-    const ControlItem*				dxl_present_position_;
-    const ControlItem*				dxl_present_velocity_;
-    const ControlItem*				dxl_present_current_;
-    float					dxl_protocol_version_;
-    std::mutex					dxl_mtx_;
+    DynamixelWorkbench			dxl_wb_;
+    std::map<std::string, uint8_t>	dxl_ids_;
+    const ControlItem*			dxl_present_position_;
+    const ControlItem*			dxl_present_velocity_;
+    const ControlItem*			dxl_present_current_;
+    float				dxl_protocol_version_;
+    std::mutex				dxl_mtx_;
 
   // Differential wheel drive stuffs conmmanded by twist tocpic
-    double					wheel_separation_;
-    double					wheel_radius_;
+    double				wheel_separation_;
+    double				wheel_radius_;
 
   // Joint trajectory buffer stuffs commanded by joint trajectory topic
-    const bool					use_moveit_;
-    trajectory_t				trajectory_;
-    trajectory_point_iter			current_point_;
-    std::mutex					current_point_mtx_;
+    const bool				use_moveit_;
+    trajectory_t			trajectory_;
+    trajectory_point_iter		current_point_;
+    std::mutex				current_point_mtx_;
 
   // ROS service, subscribers, publishers and timers
-    const callback_group_p			dxl_command_callback_group_;
-    const service_p<dynamixel_command_t>	dxl_command_srv_;
-    const subscription_p<twist_t>		twist_sub_;
-    const subscription_p<trajectory_t>		trajectory_sub_;
-    const publisher_p<dynamixel_states_t>	dxl_states_pub_;
-    const publisher_p<joint_state_t>		joint_state_pub_;
-    const callback_group_p			read_timer_callback_group_;
-    const timer_p				read_timer_;
-    const double				write_period_;
-    const callback_group_p			write_timer_callback_group_;
-    const timer_p				write_timer_;
+    const callback_group_p		dxl_command_callback_group_;
+    const srv_p<dynamixel_command_t>	dxl_command_srv_;
+    const sub_p<twist_t>		twist_sub_;
+    const sub_p<trajectory_t>		trajectory_sub_;
+    const pub_p<dynamixel_states_t>	dxl_states_pub_;
+    const pub_p<joint_state_t>		joint_state_pub_;
+    const callback_group_p		read_timer_callback_group_;
+    const timer_p			read_timer_;
+    const double			write_period_;
+    const callback_group_p		write_timer_callback_group_;
+    const timer_p			write_timer_;
 };
 
 DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
@@ -424,8 +425,8 @@ DynamixelController::initControlItems()
  *  Callback for service dynamixel_workbench_msgs::srv::DynamixelCommand
  */
 void
-DynamixelController::dynamixelCommandCallback(
-    const dynamixel_command_req req, dynamixel_command_res res)
+DynamixelController::dynamixelCommandCallback(req_p<dynamixel_command_t> req,
+					      res_p<dynamixel_command_t> res)
 {
     RCLCPP_INFO_STREAM(get_logger(),
 		       "Received service request to write value[" << req->value
@@ -449,7 +450,7 @@ DynamixelController::dynamixelCommandCallback(
  *  and send them to Dynamixels.
  */
 void
-DynamixelController::twistCallback(const twist_p& twist)
+DynamixelController::twistCallback(const msg_cp<twist_t>& twist)
 {
     std::vector<uint8_t>	id_array;
     float			rpm = 0.0;
@@ -540,7 +541,7 @@ DynamixelController::twistCallback(const twist_p& twist)
  *  Store the subscribed trajectory command in this->trajectory_
  */
 void
-DynamixelController::trajectoryCallback(const trajectory_p& trajectory)
+DynamixelController::trajectoryCallback(const msg_cp<trajectory_t>& trajectory)
 {
     const std::lock_guard<std::mutex>	lock(current_point_mtx_);
 
