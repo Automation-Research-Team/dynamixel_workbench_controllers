@@ -105,11 +105,11 @@ class DynamixelController : public rclcpp::Node
     template <class MSG>
     using sub_p			= typename rclcpp::Subscription<MSG>::SharedPtr;
     template <class MSG>
-    using msg_cp		= typename MSG::ConstSharedPtr;
+    using msg_p			= typename MSG::UniquePtr;
     template <class SRV>
     using srv_p			= typename rclcpp::Service<SRV>::SharedPtr;
     template <class SRV>
-    using req_p			= typename SRV::Request::SharedPtr;
+    using req_cp		= typename SRV::Request::ConstSharedPtr;
     template <class SRV>
     using res_p			= typename SRV::Response::SharedPtr;
 
@@ -129,10 +129,10 @@ class DynamixelController : public rclcpp::Node
     void	initDynamixels(const std::string& yaml_url)		;
     void	initControlItems()					;
 
-    void	dynamixelCommandCallback(req_p<dynamixel_command_t> req,
+    void	dynamixelCommandCallback(req_cp<dynamixel_command_t> req,
 					 res_p<dynamixel_command_t> res);
-    void	twistCallback(const msg_cp<twist_t>& twist)		;
-    void	trajectoryCallback(const msg_cp<trajectory_t>& trajectory);
+    void	twistCallback(msg_p<twist_t> twist)			;
+    void	trajectoryCallback(msg_p<trajectory_t> trajectory)	;
 
     void	readDynamixelStatesCallback()				;
     void	writeTrajectoryPointCallback()				;
@@ -425,8 +425,8 @@ DynamixelController::initControlItems()
  *  Callback for service dynamixel_workbench_msgs::srv::DynamixelCommand
  */
 void
-DynamixelController::dynamixelCommandCallback(req_p<dynamixel_command_t> req,
-					      res_p<dynamixel_command_t> res)
+DynamixelController::dynamixelCommandCallback(req_cp<dynamixel_command_t> req,
+					      res_p<dynamixel_command_t>  res)
 {
     RCLCPP_INFO_STREAM(get_logger(),
 		       "Received service request to write value[" << req->value
@@ -450,7 +450,7 @@ DynamixelController::dynamixelCommandCallback(req_p<dynamixel_command_t> req,
  *  and send them to Dynamixels.
  */
 void
-DynamixelController::twistCallback(const msg_cp<twist_t>& twist)
+DynamixelController::twistCallback(msg_p<twist_t> twist)
 {
     std::vector<uint8_t>	id_array;
     float			rpm = 0.0;
@@ -541,7 +541,7 @@ DynamixelController::twistCallback(const msg_cp<twist_t>& twist)
  *  Store the subscribed trajectory command in this->trajectory_
  */
 void
-DynamixelController::trajectoryCallback(const msg_cp<trajectory_t>& trajectory)
+DynamixelController::trajectoryCallback(msg_p<trajectory_t> trajectory)
 {
     const std::lock_guard<std::mutex>	lock(current_point_mtx_);
 
