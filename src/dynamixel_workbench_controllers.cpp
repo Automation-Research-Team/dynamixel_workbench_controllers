@@ -161,7 +161,6 @@ class DynamixelController : public rclcpp::Node
     std::mutex				current_point_mtx_;
 
   // ROS service, subscribers, publishers and timers
-    const callback_group_p		dxl_command_callback_group_;
     const srv_p<dynamixel_command_t>	dxl_command_srv_;
     const sub_p<twist_t>		twist_sub_;
     const sub_p<trajectory_t>		trajectory_sub_;
@@ -197,15 +196,12 @@ DynamixelController::DynamixelController(const rclcpp::NodeOptions& options)
      current_point_(trajectory_.points.end()),
      current_point_mtx_(),
 
-     dxl_command_callback_group_(
-	 create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive)),
      dxl_command_srv_(create_service<dynamixel_command_t>(
 			  "~/dynamixel_command",
 			  std::bind(
 			      &DynamixelController::dynamixelCommandCallback,
 			      this,
-			      std::placeholders::_1, std::placeholders::_2),
-			  rclcpp::ServicesQoS(), dxl_command_callback_group_)),
+			      std::placeholders::_1, std::placeholders::_2))),
      twist_sub_(wheel_separation_ > 0.0 && wheel_radius_ > 0.0 ?
 		create_subscription<twist_t>(
 		    "~/cmd_vel", 100,
